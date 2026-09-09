@@ -1,0 +1,106 @@
+{
+  "name": "offline-js-lab",
+  "version": "0.3.2",
+  "description": "A local JavaScript and TypeScript scratchpad with a Vue-powered cyberdeck interface.",
+  "main": "./out/main/index.js",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "electron:ensure": "node scripts/ensure-electron.mjs",
+    "prestart": "npm run electron:ensure",
+    "start": "electron-vite dev",
+    "predev": "npm run electron:ensure",
+    "dev": "electron-vite dev",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "test": "vitest run",
+    "check": "npm run check:source && npm run typecheck && npm test",
+    "build": "npm run check:source && npm run typecheck && electron-vite build",
+    "prepreview": "npm run electron:ensure",
+    "preview": "electron-vite preview",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:nsis": "npm run build && electron-builder --win nsis --x64",
+    "dist:portable": "npm run build && electron-builder --win portable --x64",
+    "check:source": "node scripts/check-source.mjs"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2",
+    "monaco-editor": "0.56.0",
+    "vue": "3.5.25"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@vitejs/plugin-vue": "6.0.2",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "5.0.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vitest": "4.0.16",
+    "vue-tsc": "3.3.11"
+  },
+  "build": {
+    "appId": "com.offlinejslab.desktop",
+    "productName": "Offline JS Lab",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "npmRebuild": false,
+    "files": [
+      "out/**/*",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "asarUnpack": [
+      "node_modules/esbuild/**/*",
+      "node_modules/@esbuild/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "src/main/runner.cjs",
+        "to": "runner.cjs"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

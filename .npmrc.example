@@ -1,0 +1,3 @@
+# 公司电脑可在项目、用户或全局 .npmrc 中配置内网 Registry。
+# Offline JS Lab 会直接复用当前 npm CLI 与其标准配置。
+# registry=https://your-internal-npm.example.com/

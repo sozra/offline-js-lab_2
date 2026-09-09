@@ -1,0 +1,337 @@
+# Offline JS Lab v0.3.2
+
+Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
+
+v0.3.x 将此前的原生 HTML/CSS/JavaScript Renderer 重构为 Vue 技术栈，并加入一套受《赛博朋克 2077》界面语言启发的原创 Cyberdeck UI。项目没有使用游戏字体、Logo、截图、音效或其他专有素材。
+
+v0.3.2 修复 Monaco 0.56 自定义入口使用错误导致的 Renderer 挂载前黑屏，修正两个只读 `computed` 的 TypeScript 类型，并避开 `vue-tsc` 3.1.6 的模板 codegen 崩溃。启动阶段现在始终显示加载占位；若 Vue、Monaco 或 Preload 初始化失败，会直接显示错误诊断而不是纯黑窗口。
+
+v0.3.1 修复 Electron 42+ 延迟下载二进制与 electron-vite 5 启动方式不兼容而导致的 `Error: Electron uninstall`。
+
+## 主要能力
+
+- 左侧 Monaco Editor 编写 JavaScript / TypeScript，右侧查看 stdout、stderr、编译信息和 npm 输出。
+- 中间分隔条可拖动、方向键微调，双击或按 Home 恢复 50:50。
+- 支持手动运行，以及停止输入约 500 ms 后自动执行的实时运行。
+- 可设置每次手动或实时运行前是否清空输出，也可随时手动清空。
+- JS/TS 通过 esbuild 打包，再交给独立 Node.js 子进程执行。
+- 支持顶层 `await`、ESM、CommonJS `require()`、Node 内置模块、相对模块和工作区 npm 包。
+- 通过标准 npm CLI 安装、同步、卸载 Lodash、Day.js 等包。
+- 自动扫描工作区 `.d.ts` 并注入 Monaco 语言服务。
+- 新建、打开、保存、另存为，以及未保存修改确认。
+- macOS 与 Windows 共用同一套源码；当前阶段可只用 `npm start`。
+
+## 开发环境
+
+推荐：
+
+- Node.js 22 或更高版本；
+- npm 10 或更高版本；
+- macOS 或 Windows；
+- 首次安装应用依赖时能访问 npm Registry，或公司内网 npm 仓库。
+
+安装并启动：
+
+```bash
+npm install
+npm start
+```
+
+第一次执行 `npm start` 时，`prestart` 会先运行：
+
+```bash
+npm run electron:ensure
+```
+
+它会检查 `node_modules/electron/path.txt` 及其指向的本机可执行文件；Electron 二进制尚未准备好时，自动调用项目本地的 `install-electron`。后续启动只做快速存在性检查，不会重复下载。
+
+需要单独重试安装时可以执行：
+
+```bash
+npm run electron:ensure
+# 或 Electron 官方等价命令
+npx install-electron --no
+```
+
+常用检查：
+
+```bash
+npm run check:source
+npm run typecheck
+npm test
+npm run build
+```
+
+`npm start` 先确保 Electron 本机二进制存在，再启动 electron-vite 开发服务。修改 Vue、CSS、主进程或 Preload 后可以快速重载。当前使用场景不要求先构建 DMG 或 EXE。
+
+## `Electron uninstall` 启动错误
+
+这个文本容易被理解为 Electron 被卸载，实际表示 electron-vite 没有在 `node_modules/electron/path.txt` 找到已安装二进制路径。Electron 42 起不再在 npm `postinstall` 阶段下载自身，而会在第一次运行 Electron CLI 时按需下载；electron-vite 5.0.0 启动前直接读取 `path.txt`，因此会在二进制尚未生成时先报错。
+
+v0.3.1 已通过 `prestart → electron:ensure` 处理这一顺序问题。旧版 v0.3.0 可以在项目目录临时执行：
+
+```bash
+npx install-electron --no
+npm start
+```
+
+若安装脚本本身报下载、证书、代理或解压错误，再检查：
+
+```bash
+node -v
+npm -v
+npm config get registry
+env | grep '^ELECTRON_'
+```
+
+不要设置 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`。公司环境若不能访问 Electron 二进制下载地址，需要按公司镜像策略配置 Electron mirror；普通 npm Registry 能安装 `electron` 这个 JavaScript 包，并不一定代表可以取得体积较大的 Electron 平台二进制。
+
+## v0.3.1 全黑窗口与 `vue-tsc` 3.1.6
+
+旧版能启动 Electron、但窗口只有黑色背景时，主要原因不是 CSS：`monaco-editor/editor` 的自定义入口不会自动把 TypeScript API 挂载回 `monaco` 命名空间，而旧实现会在 Vue 挂载前读取这个不存在的 API 并抛错。由于当时入口使用静态 `import App from './App.vue'`，异常发生在 `createApp()` 之前，页面没有机会显示错误。
+
+v0.3.2 改为从以下入口直接导入官方具名导出：
+
+```ts
+import {
+  ModuleKind,
+  ModuleResolutionKind,
+  ScriptTarget,
+  javascriptDefaults,
+  typescriptDefaults
+} from 'monaco-editor/languages/features/typescript/register'
+```
+
+Renderer 入口也改为动态导入 `App.vue`，并提供启动错误页。以后即使依赖入口再次变化，也会看到异常堆栈和 `RELOAD RENDERER`，而不是纯黑窗口。
+
+同时，`vue-tsc` 3.1.6 与 Vue 3.5.25 的组合存在 `walkObjectLiteral` 内部崩溃。v0.3.2 固定使用已包含修复的 `vue-tsc` 3.3.11。升级旧目录后必须让 npm 更新开发依赖：
+
+```bash
+npm install
+npm run check
+npm start
+```
+
+若只是想先确认旧目录中的黑屏根因，也可在 Electron 窗口按 `Cmd + Option + I` 打开开发者工具；旧版通常会看到 `Monaco TypeScript language service 未加载` 一类启动异常。
+
+## 应用依赖与脚本依赖
+
+两类 `node_modules` 彼此独立：
+
+```text
+offline-js-lab/node_modules/
+```
+
+这是应用自身依赖，包括 Electron、Vue、Monaco、electron-vite 与 esbuild，由项目根目录的 `npm install` 生成。
+
+```text
+~/Documents/OfflineJsLabWorkspace/node_modules/              # macOS
+%USERPROFILE%\Documents\OfflineJsLabWorkspace\node_modules\  # Windows
+```
+
+这是用户脚本运行时依赖。点击右上角 `MATRIX` 打开 Dependency Matrix，在其中安装：
+
+```text
+lodash dayjs
+```
+
+或直接进入工作区运行：
+
+```bash
+npm install lodash dayjs
+npm install -D @types/lodash
+```
+
+脚本示例：
+
+```ts
+import _ from 'lodash'
+import dayjs from 'dayjs'
+
+const rows = [
+  { projectName: 'A', value: 1 },
+  { projectName: 'A', value: 2 },
+  { projectName: 'B', value: 3 }
+]
+
+console.log(_.groupBy(rows, 'projectName'))
+console.log(dayjs('20260908').format('YYYY-MM-DD'))
+```
+
+CommonJS 也可以使用：
+
+```js
+const _ = require('lodash')
+const dayjs = require('dayjs')
+
+console.log(_.uniq([1, 1, 2, 3]))
+console.log(dayjs().format('YYYY-MM-DD HH:mm:ss'))
+```
+
+## 公司内网 npm 仓库
+
+应用不维护第二套包管理器，也不在源码中硬编码 Registry、Token、证书或代理。它调用当前环境可用的 Node/npm，并沿用 npm 标准配置优先级中的项目、用户与全局 `.npmrc`。
+
+只要公司 Windows 终端中下列命令可用，Dependency Matrix 通常也会使用同一内网配置：
+
+```powershell
+npm install lodash
+```
+
+仓库附有 `.npmrc.example`，仅用于说明配置形式，不包含真实地址或凭据。
+
+## 运行模式
+
+### MANUAL
+
+通过以下方式运行：
+
+- 点击 `EXECUTE`；
+- macOS：`Cmd + Enter`；
+- Windows：`Ctrl + Enter`。
+
+### LIVE
+
+切换到 `LIVE` 后，代码停止修改约 500 ms 会自动运行。快速连续输入只保留最后一次执行意图；若旧脚本仍在运行，应用会先终止旧进程，再执行最新代码。
+
+### RUN:CLEAR
+
+输出区顶部的 `RUN:CLEAR` 控制每次运行前是否清空：
+
+- 开启：手动和实时运行都先清空；
+- 关闭：每次结果追加到现有输出；
+- `PURGE`：立即清空，但不改变设置。
+
+该偏好保存为：
+
+```text
+offlineJsLab.clearOutputOnRun
+```
+
+## 没有运行超时
+
+v0.3.2 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
+
+仍保留单次 8 MB 输出上限，避免无限打印拖垮界面。这是缓冲保护，不是超时。
+
+## Vue Renderer 结构
+
+```text
+src/
+├─ main/
+│  ├─ index.ts               Electron 生命周期、窗口、IPC
+│  ├─ run-manager.ts         esbuild 与 Node 子进程
+│  ├─ npm-manager.ts         npm CLI 操作
+│  ├─ runtime.ts             Node/npm 路径解析
+│  ├─ workspace.ts           工作区、package.json、.d.ts
+│  └─ runner.cjs             子进程入口
+├─ preload/
+│  └─ index.ts               contextBridge 白名单 API
+├─ shared/
+│  ├─ ipc.ts                 IPC channel 常量
+│  └─ types.ts               主进程、Preload、Renderer 共享类型
+└─ renderer/
+   ├─ index.html
+   └─ src/
+      ├─ App.vue             应用状态与顶层编排
+      ├─ components/
+      │  ├─ MonacoEditor.vue
+      │  ├─ OutputConsole.vue
+      │  ├─ PackageDialog.vue
+      │  ├─ ConfirmDialog.vue
+      │  └─ ToastStack.vue
+      ├─ composables/
+      │  ├─ useOutputBuffer.ts
+      │  ├─ useResizableSplit.ts
+      │  └─ storage.ts
+      ├─ monaco.ts           Worker、语言服务与主题
+      ├─ startup-error.ts    Vue 挂载前失败的可视化诊断
+      ├─ styles.css          Cyberdeck 设计系统与动画
+      └─ main.ts
+```
+
+参考 Offline API Lab 的工程边界，Renderer 采用 Vue 3 + TypeScript，主进程、Preload 与共享模型也迁移到 TypeScript，并由 electron-vite 分别构建。
+
+## UI / UX 设计
+
+Cyberdeck 界面以以下原则实现：
+
+- 主任务始终是“左边写代码、右边看结果”；
+- 工作区和 npm 管理留在低频弹层；
+- 黄色表示主操作，青色表示数据链路，红色表示中止或错误；
+- 斜切边框、状态码、扫描线、轻微 glitch 和运行脉冲用于建立 HUD 层次；
+- 动画不阻塞操作，并支持系统 `prefers-reduced-motion`；
+- 不加载 CDN、远程字体、远程图片或遥测资源；
+- 窄窗口会逐步隐藏次要文字，而不是挤压编辑器和输出区。
+
+## 快捷键
+
+| 操作 | macOS | Windows |
+|---|---|---|
+| 新建 | `Cmd + N` | `Ctrl + N` |
+| 打开 | `Cmd + O` | `Ctrl + O` |
+| 保存 | `Cmd + S` | `Ctrl + S` |
+| 另存为 | `Cmd + Shift + S` | `Ctrl + Shift + S` |
+| 运行 | `Cmd + Enter` | `Ctrl + Enter` |
+| 停止 | `Cmd + .` | `Ctrl + .` |
+
+## 本地持久化
+
+Renderer 使用 `localStorage` 保存：
+
+| Key | 用途 | 默认值 |
+|---|---|---|
+| `offlineJsLab.code` | 未保存草稿 | 内置示例 |
+| `offlineJsLab.language` | JS / TS | `typescript` |
+| `offlineJsLab.runMode` | 手动 / 实时 | `manual` |
+| `offlineJsLab.clearOutputOnRun` | 运行前清空 | `true` |
+| `offlineJsLab.splitRatio` | 左右分栏比例 | `0.5` |
+
+工作区路径存放在 Electron `userData/settings.json`，而不是 Renderer。
+
+## 安全边界
+
+Renderer 保持：
+
+```text
+nodeIntegration: false
+contextIsolation: true
+sandbox: true
+```
+
+Preload 只暴露具名、类型化 IPC API。用户代码在独立 Node 子进程中执行，不直接进入 Vue Renderer 或 Electron 主进程。
+
+但当前定位是个人开发工具，不是恶意代码沙箱。脚本与 npm 包仍拥有当前操作系统用户权限，可以读取文件、访问网络、启动进程，并执行 npm 生命周期脚本。只应运行自己信任的代码与依赖。
+
+## 构建
+
+目前可只使用 `npm start`。需要构建时：
+
+```bash
+npm run dist:mac
+```
+
+```powershell
+npm run dist:win
+```
+
+Windows 也可分别生成 NSIS 与 Portable：
+
+```powershell
+npm run dist:nsis
+npm run dist:portable
+```
+
+未配置代码签名证书。
+
+## 当前非目标
+
+- 多标签页与项目文件树；
+- 断点调试；
+- 变量内联结果；
+- 完整 IDE；
+- 账号、云同步、遥测、自动更新；
+- 不受信任代码沙箱；
+- 重新加入运行超时。
+
+维护或交给 AI coding agent 前，请先阅读根目录的 [`AGENTS.md`](./AGENTS.md)。
