@@ -20,6 +20,7 @@ import type {
   TypeDefinitionFile
 } from '@shared/types'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import CyberSelect from './components/CyberSelect.vue'
 import MonacoEditor from './components/MonacoEditor.vue'
 import OutputConsole from './components/OutputConsole.vue'
 import PackageDialog from './components/PackageDialog.vue'
@@ -543,7 +544,7 @@ function maybeFinishBoot(): void {
   bootHideTimer = window.setTimeout(() => {
     bootVisible.value = false
     bootHideTimer = null
-  }, 420)
+  }, 280)
 }
 
 function handleAppCommand(command: AppCommand): void {
@@ -700,13 +701,17 @@ onBeforeUnmount(() => {
       </nav>
 
       <div class="command-controls">
-        <label class="select-module">
-          <span>LANG</span>
-          <select :value="language" :disabled="fileActionsBlocked" aria-label="脚本语言" @change="setLanguage(($event.target as HTMLSelectElement).value as ScriptLanguage)">
-            <option value="typescript">TYPE·SCRIPT</option>
-            <option value="javascript">JAVA·SCRIPT</option>
-          </select>
-        </label>
+        <CyberSelect
+          :model-value="language"
+          :options="[
+            { value: 'typescript', label: 'TYPE·SCRIPT' },
+            { value: 'javascript', label: 'JAVA·SCRIPT' }
+          ]"
+          label="LANG"
+          assistive-label="脚本语言"
+          :disabled="fileActionsBlocked"
+          @update:model-value="setLanguage($event as ScriptLanguage)"
+        />
 
         <div class="mode-switch" aria-label="运行模式">
           <button type="button" :class="{ active: runMode === 'manual' }" @click="setRunMode('manual')">MANUAL</button>

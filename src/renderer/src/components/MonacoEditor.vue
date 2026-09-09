@@ -183,7 +183,7 @@ onMounted(() => {
     parameterHints: { enabled: true },
     formatOnPaste: true,
     formatOnType: true,
-    fontFamily: 'SFMono-Regular, Cascadia Code, Consolas, Liberation Mono, Menlo, monospace',
+    fontFamily: "'Fira Code', SFMono-Regular, Cascadia Code, Consolas, Liberation Mono, Menlo, monospace",
     fontLigatures: true,
     fontSize: 13,
     lineHeight: 21,
