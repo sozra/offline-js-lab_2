@@ -38,7 +38,10 @@ export default defineConfig({
       alias: {
         '@renderer': resolve('src/renderer/src'),
         '@shared': resolve('src/shared')
-      }
+      },
+      // Monaco 的编辑器贡献、语言 API 与 Worker 必须解析到同一个包实例。
+      // 显式去重可避免不同平台的 Vite 缓存产生重复模块图并让语言服务退化。
+      dedupe: ['monaco-editor']
     },
     plugins: [vue()],
     worker: {

@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.3.2 技术栈
+## 2. v0.3.3 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -80,12 +80,12 @@ Vue 应用、Monaco、composables 与 CSS。Renderer 不直接使用 `fs`、`chi
 - `src/renderer/src/main.ts`：Renderer 启动边界；先校验 Preload bridge，再动态导入并挂载 `App.vue`。
 - `src/renderer/src/startup-error.ts`：Vue/Monaco 挂载前失败时渲染可读错误页，禁止回退为纯黑窗口。
 - `src/renderer/src/App.vue`：应用级状态与跨组件编排。
-- `MonacoEditor.vue`：Monaco 生命周期、快捷键、类型定义注入。
+- `MonacoEditor.vue`：Monaco 生命周期、显式编辑命令、Windows 键盘布局兜底、Worker 自检和类型定义注入。
 - `OutputConsole.vue`：输出显示、自动跟随、清空设置。
 - `PackageDialog.vue`：工作区与 npm 低频操作。
 - `useResizableSplit.ts`：分栏比例与拖拽。
 - `useOutputBuffer.ts`：ANSI 清理、分块合并与 revision。
-- `monaco.ts`：Monaco 0.56 modular imports、Worker、TS/JS defaults、主题。
+- `monaco.ts`：Monaco 0.56 完整入口、单实例 TS/JS API、Worker、自检、mode configuration 与主题。
 - `styles.css`：全局 Cyberdeck 设计系统、响应式和动画。
 
 ## 6. 启动与执行链路
@@ -232,29 +232,48 @@ electron-vite 5.0.0 内建 Electron 版本目标表暂未覆盖 44，所以 `ele
 
 ## 12. Monaco 约束
 
-Monaco 0.56 使用 modular exports：
+Monaco 0.56 必须使用完整官方入口：
+
+```ts
+import * as monaco from 'monaco-editor'
+```
+
+项目刻意不再使用 `monaco-editor/editor` 加多个副作用 `register` 的自定义组合。完整入口会加载全部编辑器 features 与 languages，可避免不同平台或 Vite 预构建缓存只保留 tokenizer、却遗漏 hover、formatter、context menu command 等能力。
+
+必须保持以下不变量：
+
+- TypeScript/JavaScript API 从同一个 `monaco.typescript` 运行时对象取得；
+- `electron.vite.config.ts` 的 Renderer 保留 `dedupe: ['monaco-editor']`；
+- `MonacoEnvironment.getWorker()` 将 `javascript` / `typescript` 映射到 TS Worker，其余映射到 Editor Worker；
+- `typescriptDefaults` 和 `javascriptDefaults` 都显式调用 `setModeConfiguration()`，开启 hover、completion、formatting、diagnostics 等能力；
+- 编辑器显式启用 `contextmenu` 与 `hover`；
+- `MonacoEditor.vue` 保留行注释、块注释与格式化文档 action；
+- `Ctrl/Cmd + /` 除 Monaco keybinding 外，还要保留基于 `KeyboardEvent.code === 'Slash'` 的捕获级兜底，以兼容 Windows 键盘布局；
+- 创建编辑器和切换语言后调用 `probeLanguageService()`，实际取得 Worker 并执行诊断；不能只检查对象是否存在；
+- Worker 失败时通过 `language-service` 事件把可见诊断传给 `App.vue`，不得静默显示为“在线”。
+
+不要重新引入以下模式：
 
 ```ts
 import * as monaco from 'monaco-editor/editor'
 import 'monaco-editor/features/register.all'
-import 'monaco-editor/languages/definitions/javascript/register'
-import {
-  ModuleKind, ModuleResolutionKind, ScriptTarget,
-  javascriptDefaults, typescriptDefaults
-} from 'monaco-editor/languages/features/typescript/register'
+// 再通过其他入口拼接 JS/TS language features
 ```
 
-不要退回已经失效的 `monaco-editor/basic-languages/...` 或旧 `esm/vs/...` 路径。也不要再尝试从 `(monaco as any).typescript` 或 `monaco.languages.typescript` 猜测 API；Monaco 0.56 自定义入口下必须使用 `register` 模块的具名导出，否则会在 Vue 挂载前抛错并导致黑屏。
+也不要使用旧的 `monaco-editor/basic-languages/...`、`esm/vs/...` 私有路径，或加载两个不同 Monaco 实例。
 
-更改 Monaco 时验证：
+更改 Monaco 时至少在 macOS 与 Windows 人工验证：
 
-- 编辑器加载；
-- TS/JS 诊断；
-- TS Worker 正确分流；
-- Lodash 类型补全；
-- 主题；
-- `npm start` 与生产构建路径。
-
+1. 编辑器正常加载、输入和撤销；
+2. 悬浮本地变量、带 JSDoc 的函数和 Lodash API 会显示类型/注释；
+3. 右键菜单包含注释与格式化操作；
+4. `Ctrl/Cmd + /` 切换行注释；
+5. `Ctrl/Cmd + Shift + /` 切换块注释；
+6. `Shift + Alt/Option + F` 格式化文档；
+7. 标题状态显示 `TS/JS LANGUAGE SERVICE ONLINE`；
+8. 人为破坏 Worker 映射后显示 `LANGUAGE SERVICE DEGRADED`，并在输出区写入错误；
+9. npm 类型定义扫描后 Lodash/Day.js 补全可用；
+10. `npm start` 与生产构建中的 Worker URL 都正确。
 
 启动错误边界必须保持：
 
@@ -268,7 +287,7 @@ import {
 
 - 禁止重新固定 `vue-tsc` 3.1.6；该版本会在部分 Vue 3.5.25 模板上于 `walkObjectLiteral` 内部崩溃；
 - 只读 `computed()` 的公开类型使用 `ComputedRef<T>`，不要写 `ReturnType<typeof computed<T>>`，后者会错误匹配 writable overload；
-- 升级 Vue、TypeScript 或 vue-tsc 时必须实际运行 `npm run typecheck:web`。
+- 升级 Vue、TypeScript、Monaco 或 vue-tsc 时必须实际运行 `npm run typecheck:web`。
 
 ## 13. Vue 组件约定
 
@@ -339,17 +358,18 @@ Renderer/UI 改动还要人工检查：
 1. 清空 Electron 二进制后，首次 `npm start` 能自动准备；第二次启动不会重复下载；
 2. macOS 和 Windows 标题栏不挡控件；
 3. 启动自检能够结束；
-4. Monaco 显示并能输入；
-5. 人为破坏 App/Monaco 导入时显示启动诊断页，而不是纯黑；
-6. 分栏拖动、双击、键盘微调；
-7. Manual / Live；
-8. RUN:CLEAR 开关与 PURGE；
-9. 普通脚本完成后不残留运行中；
-10. 长驻脚本可 ABORT；
-11. 新建、打开、保存、另存为；
-12. Dependency Matrix 安装 Lodash/Day.js；
-13. 窗口缩至最小尺寸无关键控件重叠；
-14. 减少动态效果设置下无持续扫描动画。
+4. Monaco 显示并能输入，标题状态显示 TS/JS LANGUAGE SERVICE ONLINE；
+5. 悬浮类型/JSDoc、右键格式化、Ctrl/Cmd+/、块注释和格式化快捷键在 macOS/Windows 均可用；
+6. 人为破坏 App/Monaco 导入时显示启动诊断页，而不是纯黑；
+7. 分栏拖动、双击、键盘微调；
+8. Manual / Live；
+9. RUN:CLEAR 开关与 PURGE；
+10. 普通脚本完成后不残留运行中；
+11. 长驻脚本可 ABORT；
+12. 新建、打开、保存、另存为；
+13. Dependency Matrix 安装 Lodash/Day.js；
+14. 窗口缩至最小尺寸无关键控件重叠；
+15. 减少动态效果设置下无持续扫描动画。
 
 AI agent 完成修改时：
 

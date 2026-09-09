@@ -62,17 +62,43 @@ if (!/<script setup lang="ts">/.test(rendererSource)) failures.push('Vue Rendere
 
 const rendererMainSource = fs.readFileSync(path.join(root, 'src/renderer/src/main.ts'), 'utf8')
 const monacoSource = fs.readFileSync(path.join(root, 'src/renderer/src/monaco.ts'), 'utf8')
+const monacoEditorSource = fs.readFileSync(
+  path.join(root, 'src/renderer/src/components/MonacoEditor.vue'),
+  'utf8'
+)
+const electronViteSource = fs.readFileSync(path.join(root, 'electron.vite.config.ts'), 'utf8')
 if (!/await import\(['"]\.\/App\.vue['"]\)/.test(rendererMainSource)) {
   failures.push('Renderer 必须动态导入 App.vue，以便启动失败时显示诊断界面。')
 }
 if (!/renderStartupFailure/.test(rendererMainSource)) {
   failures.push('Renderer 缺少启动失败可视化回退。')
 }
-if (!/typescriptDefaults[\s\S]*from ['"]monaco-editor\/languages\/features\/typescript\/register['"]/.test(monacoSource)) {
-  failures.push('Monaco 0.56 必须直接使用 TypeScript register 入口的具名导出。')
+if (!/import \* as monaco from ['"]monaco-editor['"]/.test(monacoSource)) {
+  failures.push('Monaco 0.56 必须使用完整 monaco-editor 入口，确保所有编辑器贡献和语言功能被注册。')
+}
+if (!/monaco\.typescript/.test(monacoSource)) {
+  failures.push('JS/TS 默认配置必须来自完整 Monaco 实例的顶层 typescript API。')
+}
+if (!/setModeConfiguration\(modeConfiguration\)/.test(monacoSource)) {
+  failures.push('必须显式启用 JS/TS 悬浮、格式化、补全等语言能力。')
+}
+if (!/probeLanguageService/.test(monacoSource)) {
+  failures.push('缺少 Monaco TypeScript Worker 实际连通性检测。')
+}
+if (!/dedupe:\s*\[['"]monaco-editor['"]\]/.test(electronViteSource)) {
+  failures.push('Vite Renderer 必须去重 monaco-editor，避免产生多个 Monaco 模块实例。')
+}
+if (!/contextmenu:\s*true/.test(monacoEditorSource) || !/hover:\s*\{[\s\S]*enabled:\s*true/.test(monacoEditorSource)) {
+  failures.push('MonacoEditor 必须显式开启右键菜单和悬浮提示。')
+}
+if (!/editor\.action\.commentLine/.test(monacoEditorSource) || !/event\.code === ['"]Slash['"]/.test(monacoEditorSource)) {
+  failures.push('缺少 Ctrl/Cmd+/ 注释命令和 Windows 键盘布局兜底。')
+}
+if (!/editor\.action\.formatDocument/.test(monacoEditorSource)) {
+  failures.push('缺少格式化文档操作。')
 }
 if (/candidate\.typescript|candidate\.languages\?\.typescript/.test(monacoSource)) {
-  failures.push('不得从 monaco 命名空间猜测 TypeScript API；该方式会在 Monaco 0.56 下导致黑屏。')
+  failures.push('不得从自定义 Monaco 入口猜测 TypeScript API。')
 }
 if (packageJson.devDependencies?.['vue-tsc'] === '3.1.6') {
   failures.push('vue-tsc 3.1.6 存在模板 codegen 崩溃问题，必须使用修复版本。')

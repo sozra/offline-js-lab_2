@@ -1,13 +1,5 @@
-import * as monaco from 'monaco-editor/editor'
-import 'monaco-editor/features/register.all'
-import 'monaco-editor/languages/definitions/javascript/register'
-import {
-  ModuleKind,
-  ModuleResolutionKind,
-  ScriptTarget,
-  javascriptDefaults,
-  typescriptDefaults
-} from 'monaco-editor/languages/features/typescript/register'
+import type { ScriptLanguage } from '@shared/types'
+import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TypeScriptWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker'
 
@@ -17,6 +9,10 @@ const monacoGlobal = globalThis as typeof globalThis & {
   }
 }
 
+/**
+ * Monaco 的 JS/TS IntelliSense、悬浮说明和格式化依赖 TypeScript Worker。
+ * Worker 必须由应用显式映射；否则编辑器仍可能显示语法高亮，但语言服务会静默退化。
+ */
 monacoGlobal.MonacoEnvironment = {
   getWorker(_moduleId: string, label: string) {
     if (label === 'javascript' || label === 'typescript') return new TypeScriptWorker()
@@ -24,19 +20,31 @@ monacoGlobal.MonacoEnvironment = {
   }
 }
 
+const {
+  ModuleKind,
+  ModuleResolutionKind,
+  ScriptTarget,
+  getJavaScriptWorker,
+  getTypeScriptWorker,
+  javascriptDefaults,
+  typescriptDefaults
+} = monaco.typescript
+
 const typeScriptApi = {
   typescriptDefaults,
   javascriptDefaults,
   ModuleKind,
   ModuleResolutionKind,
-  ScriptTarget
+  ScriptTarget,
+  getTypeScriptWorker,
+  getJavaScriptWorker
 }
 
 export type TypeScriptApi = typeof typeScriptApi
 
 /**
- * Monaco 0.56 的自定义 ESM 入口不会把 TypeScript API 挂回 `monaco` 命名空间。
- * 始终返回 register 入口的具名导出，避免 Renderer 在 Vue 挂载前抛错并黑屏。
+ * 使用 Monaco 0.56 完整入口导出的顶层 `typescript` API，确保编辑器特性、
+ * JS/TS 语言功能和命令来自同一 Monaco 模块实例。
  */
 export function getTypeScriptApi(): TypeScriptApi {
   return typeScriptApi
@@ -70,6 +78,50 @@ typescriptDefaults.setDiagnosticsOptions(diagnosticsOptions)
 javascriptDefaults.setDiagnosticsOptions(diagnosticsOptions)
 typescriptDefaults.setEagerModelSync(true)
 javascriptDefaults.setEagerModelSync(true)
+
+/**
+ * 不依赖 Monaco 的隐式默认值。显式开启 RunJS 类 scratchpad 需要的语言能力，
+ * 防止某个平台或构建缓存只注册 tokenizer 而没有完整语言功能。
+ */
+const modeConfiguration = {
+  completionItems: true,
+  hovers: true,
+  documentSymbols: true,
+  definitions: true,
+  references: true,
+  documentHighlights: true,
+  rename: true,
+  diagnostics: true,
+  documentRangeFormattingEdits: true,
+  signatureHelp: true,
+  onTypeFormattingEdits: true,
+  codeActions: true,
+  inlayHints: true
+} satisfies Parameters<typeof typescriptDefaults.setModeConfiguration>[0]
+
+typescriptDefaults.setModeConfiguration(modeConfiguration)
+javascriptDefaults.setModeConfiguration(modeConfiguration)
+
+export interface LanguageServiceProbeResult {
+  language: ScriptLanguage
+  ok: boolean
+  message: string
+}
+
+/**
+ * 主动访问当前模型对应的 Worker。与仅检查 API 是否存在相比，这能真实发现
+ * Worker URL、CSP、Vite 构建或启动缓存导致的语言服务加载失败。
+ */
+export async function probeLanguageService(
+  language: ScriptLanguage,
+  uri: monaco.Uri
+): Promise<void> {
+  const getWorker = language === 'typescript'
+    ? await getTypeScriptWorker()
+    : await getJavaScriptWorker()
+  const worker = await getWorker(uri)
+  await worker.getSyntacticDiagnostics(uri.toString())
+}
 
 monaco.editor.defineTheme('cyberdeck-2077', {
   base: 'vs-dark',

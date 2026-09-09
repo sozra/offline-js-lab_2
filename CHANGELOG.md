@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3
+
+- 修复 Windows 环境中 Monaco 可能只保留语法高亮、但悬浮类型/JSDoc、格式化与编辑命令未完整工作的跨平台退化问题。
+- 改用 Monaco 0.56 完整 `monaco-editor` 入口，确保编辑器 features、languages 与顶层 `monaco.typescript` API 来自同一模块实例。
+- Renderer Vite 配置增加 `dedupe: ['monaco-editor']`，降低不同平台预构建缓存生成重复 Monaco 模块图的风险。
+- 通过 `setModeConfiguration()` 显式开启 JS/TS hover、completion、signature help、formatting、diagnostics、rename、references、code actions 与 inlay hints。
+- Monaco 编辑器显式启用右键菜单、悬浮、粘贴格式化和输入格式化，并在右键菜单固定加入行注释、块注释与格式化文档操作。
+- 增加 `Ctrl/Cmd + /` 与块注释的物理 `Slash` 按键兜底，兼容 Windows 不同键盘布局；增加 `Shift + Alt/Option + F` 格式化文档。
+- 增加 TypeScript/JavaScript Worker 实际连通性检测；成功显示 `LANGUAGE SERVICE ONLINE`，失败在标题、Toast 与输出区明确报告。
+- 新增对应源码检查、结构测试和 macOS/Windows 人工冒烟清单。
+
 ## 0.3.2
 
 - 修复 Monaco 0.56 自定义 ESM 入口下错误读取 `monaco.typescript` / `monaco.languages.typescript`，导致模块初始化阶段抛错、Vue 尚未挂载便出现纯黑窗口的问题。

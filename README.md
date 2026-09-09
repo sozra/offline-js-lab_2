@@ -1,8 +1,10 @@
-# Offline JS Lab v0.3.2
+# Offline JS Lab v0.3.3
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
 
 v0.3.x 将此前的原生 HTML/CSS/JavaScript Renderer 重构为 Vue 技术栈，并加入一套受《赛博朋克 2077》界面语言启发的原创 Cyberdeck UI。项目没有使用游戏字体、Logo、截图、音效或其他专有素材。
+
+v0.3.3 修复 Windows 环境中 Monaco 可能只剩语法高亮、却缺少悬浮说明、格式化菜单和 `Ctrl + /` 注释快捷键的问题。Renderer 改用 Monaco 0.56 完整入口，显式开启 JS/TS 语言能力、强制 Vite 单实例解析，并增加 TypeScript Worker 连通性自检与跨键盘布局快捷键兜底。
 
 v0.3.2 修复 Monaco 0.56 自定义入口使用错误导致的 Renderer 挂载前黑屏，修正两个只读 `computed` 的 TypeScript 类型，并避开 `vue-tsc` 3.1.6 的模板 codegen 崩溃。启动阶段现在始终显示加载占位；若 Vue、Monaco 或 Preload 初始化失败，会直接显示错误诊断而不是纯黑窗口。
 
@@ -114,6 +116,54 @@ npm start
 
 若只是想先确认旧目录中的黑屏根因，也可在 Electron 窗口按 `Cmd + Option + I` 打开开发者工具；旧版通常会看到 `Monaco TypeScript language service 未加载` 一类启动异常。
 
+## Windows 上 Monaco 语言能力缺失
+
+v0.3.2 使用 Monaco 0.56 的自定义模块入口并手动组合编辑器贡献、JavaScript 定义和 TypeScript 语言功能。该组合在 macOS 上可以正常工作，但在部分 Windows 开发环境或 Vite 缓存状态下，可能出现“编辑器能显示并高亮，但高级能力没有完整注册”的退化状态：
+
+- 鼠标悬浮变量、函数或 npm 包 API 时没有类型与注释；
+- 右键菜单中没有格式化入口；
+- `Ctrl + /` 不能切换行注释；
+- 代码仍然可以编辑和运行，因此问题不容易在启动阶段暴露。
+
+v0.3.3 改为 Monaco 官方完整入口：
+
+```ts
+import * as monaco from 'monaco-editor'
+```
+
+同时完成以下加固：
+
+- 从同一个 `monaco.typescript` 实例取得 JS/TS defaults 与 Worker API；
+- 在 electron-vite Renderer 配置中设置 `dedupe: ['monaco-editor']`；
+- 通过 `setModeConfiguration()` 显式开启 hover、completion、signature help、diagnostics、formatting、rename、references、code actions 和 inlay hints；
+- 编辑器选项显式设置 `contextmenu: true`、`hover.enabled: true`、`formatOnPaste` 与 `formatOnType`；
+- 右键菜单固定提供“切换行注释”“切换块注释”“格式化文档”；
+- 使用 `KeyboardEvent.code === 'Slash'` 为 Windows 非美式键盘布局提供 `Ctrl + /` 兜底；
+- 创建编辑器后真正调用 TypeScript/JavaScript Worker，而不是只检查 API 是否存在。
+
+编辑器标题右侧会显示类似：
+
+```text
+TS LANGUAGE SERVICE ONLINE // 24 TYPE FILES // 312 KB
+```
+
+若 Worker URL、CSP 或构建缓存导致语言服务启动失败，状态会变为：
+
+```text
+LANGUAGE SERVICE DEGRADED
+```
+
+完整错误同时写入右侧输出区，不再静默退化。
+
+从 v0.3.2 原目录升级后，建议在 Windows PowerShell 清理一次旧的 Vite 预构建缓存：
+
+```powershell
+Remove-Item -Recurse -Force node_modules\.vite, out -ErrorAction SilentlyContinue
+npm start
+```
+
+本次没有更改 npm 依赖版本，通常不必重新执行 `npm install`；使用完整 v0.3.3 源码首次启动时仍按正常流程执行 `npm install`。
+
 ## 应用依赖与脚本依赖
 
 两类 `node_modules` 彼此独立：
@@ -210,7 +260,7 @@ offlineJsLab.clearOutputOnRun
 
 ## 没有运行超时
 
-v0.3.2 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
+v0.3.3 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
 
 仍保留单次 8 MB 输出上限，避免无限打印拖垮界面。这是缓冲保护，不是超时。
 
@@ -274,6 +324,9 @@ Cyberdeck 界面以以下原则实现：
 | 另存为 | `Cmd + Shift + S` | `Ctrl + Shift + S` |
 | 运行 | `Cmd + Enter` | `Ctrl + Enter` |
 | 停止 | `Cmd + .` | `Ctrl + .` |
+| 切换行注释 | `Cmd + /` | `Ctrl + /` |
+| 切换块注释 | `Cmd + Shift + /` | `Ctrl + Shift + /` |
+| 格式化文档 | `Shift + Option + F` | `Shift + Alt + F` |
 
 ## 本地持久化
 

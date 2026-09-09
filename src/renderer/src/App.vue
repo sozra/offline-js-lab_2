@@ -28,6 +28,7 @@ import { readBooleanStorage, readStorage, writeStorage } from './composables/sto
 import { useOutputBuffer } from './composables/useOutputBuffer'
 import { useResizableSplit } from './composables/useResizableSplit'
 import { DEFAULT_JAVASCRIPT, DEFAULT_TYPESCRIPT } from './defaults'
+import type { LanguageServiceProbeResult } from './monaco'
 
 const api = window.offlineJsLab
 const AUTO_RUN_DELAY_MS = 500
@@ -48,7 +49,9 @@ const dirty = ref(false)
 const editorRef = ref<InstanceType<typeof MonacoEditor>>()
 const splitHost = ref<HTMLElement>()
 const editorReady = ref(false)
-const editorMessage = ref('INITIALIZING EDITOR CORE')
+const languageServiceMessage = ref('LANGUAGE SERVICE LINKING')
+const typeIndexMessage = ref('TYPE INDEX PENDING')
+const editorMessage = computed(() => `${languageServiceMessage.value} // ${typeIndexMessage.value}`)
 const typeDefinitions = ref<TypeDefinitionFile[]>([])
 
 const packageState = ref<PackageState | null>(null)
@@ -80,6 +83,7 @@ const bootError = ref('')
 let bootstrapReady = false
 let bootHideTimer: number | null = null
 let clockTimer: number | null = null
+let lastLanguageServiceFailure = ''
 
 const toasts = ref<ToastMessage[]>([])
 let nextToastId = 1
@@ -358,14 +362,14 @@ async function saveFile(saveAs = false): Promise<void> {
 }
 
 async function refreshTypeDefinitions(): Promise<void> {
-  editorMessage.value = 'INDEXING PACKAGE TYPES'
+  typeIndexMessage.value = 'INDEXING PACKAGE TYPES'
   try {
     const result = await api.getTypeDefinitions()
     typeDefinitions.value = result.files
-    editorMessage.value = `${result.files.length} TYPE FILES // ${Math.round(result.totalBytes / 1024)} KB`
+    typeIndexMessage.value = `${result.files.length} TYPE FILES // ${Math.round(result.totalBytes / 1024)} KB`
     if (result.truncated) showToast('类型定义超过扫描上限，只加载了部分文件', 'info')
   } catch (error) {
-    editorMessage.value = 'TYPE INDEX FAILED'
+    typeIndexMessage.value = 'TYPE INDEX FAILED'
     showToast(`加载类型定义失败：${formatError(error)}`, 'error')
   }
 }
@@ -481,11 +485,25 @@ function onEditorChange(): void {
 
 function onEditorReady(): void {
   editorReady.value = true
-  editorMessage.value = 'EDITOR CORE ONLINE'
+  languageServiceMessage.value = 'EDITOR CORE ONLINE // LS LINKING'
   bootProgress.value = Math.max(bootProgress.value, 68)
   editorRef.value?.focus()
   if (runMode.value === 'live') scheduleAutoRun(80)
   maybeFinishBoot()
+}
+
+function onLanguageServiceStatus(result: LanguageServiceProbeResult): void {
+  if (result.ok) {
+    languageServiceMessage.value = result.message
+    lastLanguageServiceFailure = ''
+    return
+  }
+
+  languageServiceMessage.value = 'LANGUAGE SERVICE DEGRADED'
+  if (result.message === lastLanguageServiceFailure) return
+  lastLanguageServiceFailure = result.message
+  appendOutput(`\n[EDITOR LANGUAGE SERVICE] ${result.message}\n`, 'stderr')
+  showToast('Monaco 语言服务加载失败；悬浮说明和格式化可能不可用', 'error')
 }
 
 function maybeFinishBoot(): void {
@@ -692,6 +710,7 @@ onBeforeUnmount(() => {
             :read-only="npmBusy"
             @change="onEditorChange"
             @ready="onEditorReady"
+            @language-service="onLanguageServiceStatus"
             @run="runCode('manual')"
             @save="saveFile(false)"
             @open="openFile"

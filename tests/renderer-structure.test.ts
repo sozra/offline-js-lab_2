@@ -14,6 +14,8 @@ const rendererMain = read('src/renderer/src/main.ts')
 const rendererHtml = read('src/renderer/index.html')
 const startupError = read('src/renderer/src/startup-error.ts')
 const monaco = read('src/renderer/src/monaco.ts')
+const monacoEditor = read('src/renderer/src/components/MonacoEditor.vue')
+const electronViteConfig = read('electron.vite.config.ts')
 const outputBuffer = read('src/renderer/src/composables/useOutputBuffer.ts')
 const resizableSplit = read('src/renderer/src/composables/useResizableSplit.ts')
 const packageJson = JSON.parse(read('package.json')) as {
@@ -24,7 +26,7 @@ const packageJson = JSON.parse(read('package.json')) as {
 
 describe('Vue renderer architecture', () => {
   it('使用 Vue 3 + electron-vite + TypeScript + Monaco', () => {
-    expect(packageJson.version).toBe('0.3.2')
+    expect(packageJson.version).toBe('0.3.3')
     expect(packageJson.dependencies.vue).toBeTruthy()
     expect(packageJson.dependencies['monaco-editor']).toBe('0.56.0')
     expect(packageJson.devDependencies['electron-vite']).toBeTruthy()
@@ -47,14 +49,26 @@ describe('Vue renderer architecture', () => {
     expect(output).toMatch(/update:clearOnRun/)
   })
 
-  it('Monaco 0.56 直接使用 TypeScript register 入口导出，避免挂载前黑屏', () => {
-    expect(monaco).toMatch(
-      /from 'monaco-editor\/languages\/features\/typescript\/register'/
-    )
-    expect(monaco).toMatch(/typescriptDefaults/)
-    expect(monaco).toMatch(/javascriptDefaults/)
+  it('Monaco 0.56 使用完整官方入口并强制单实例，避免跨平台能力退化', () => {
+    expect(monaco).toMatch(/import \* as monaco from 'monaco-editor'/)
+    expect(monaco).toMatch(/monaco\.typescript/)
+    expect(monaco).toMatch(/setModeConfiguration\(modeConfiguration\)/)
+    expect(monaco).toMatch(/probeLanguageService/)
     expect(monaco).not.toMatch(/candidate\.typescript/)
     expect(monaco).not.toMatch(/candidate\.languages\?\.typescript/)
+    expect(electronViteConfig).toMatch(/dedupe:\s*\['monaco-editor'\]/)
+  })
+
+  it('显式启用悬浮、右键菜单、格式化和 Windows 注释快捷键兜底', () => {
+    expect(monacoEditor).toMatch(/contextmenu:\s*true/)
+    expect(monacoEditor).toMatch(/hover:\s*\{[\s\S]*enabled:\s*true/)
+    expect(monacoEditor).toMatch(/editor\.action\.commentLine/)
+    expect(monacoEditor).toMatch(/editor\.action\.blockComment/)
+    expect(monacoEditor).toMatch(/editor\.action\.formatDocument/)
+    expect(monacoEditor).toMatch(/KeyCode\.Slash/)
+    expect(monacoEditor).toMatch(/event\.code === 'Slash'/)
+    expect(monacoEditor).toMatch(/@?language-service|language-service/)
+    expect(app).toMatch(/@language-service="onLanguageServiceStatus"/)
   })
 
   it('Renderer 启动失败时显示诊断界面，而不是保持纯黑', () => {
