@@ -76,6 +76,13 @@ let autoRunTimer: number | null = null
 const runStatusLabel = ref('IDLE')
 const runStatusKind = ref('idle')
 
+const glitchBurst = ref<'' | 'run' | 'error' | 'abort'>('')
+const glitchSeq = ref(0)
+let glitchTimer: number | null = null
+const runElapsedMs = ref(0)
+let runStartedAt = 0
+let runClockTimer: number | null = null
+
 const bootVisible = ref(true)
 const bootProgress = ref(12)
 const bootMessage = ref('NEURAL LINK // INITIALIZING')
@@ -165,6 +172,23 @@ function setRunStatus(label: string, kind = 'idle'): void {
   runStatusKind.value = kind
 }
 
+const runStatusDisplay = computed(() => {
+  if (!running.value) return runStatusLabel.value
+  const elapsed = formatDuration(runElapsedMs.value)
+  return elapsed ? `${runStatusLabel.value} // ${elapsed}` : runStatusLabel.value
+})
+
+function triggerGlitch(kind: 'run' | 'error' | 'abort'): void {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  if (glitchTimer !== null) window.clearTimeout(glitchTimer)
+  glitchBurst.value = kind
+  glitchSeq.value += 1
+  glitchTimer = window.setTimeout(() => {
+    glitchBurst.value = ''
+    glitchTimer = null
+  }, 400)
+}
+
 function dividerLabel(trigger: RunTrigger): string {
   const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
   return `\n╞══ ${trigger === 'auto' ? 'LIVE EXECUTION' : 'MANUAL EXECUTION'} // ${time} ══╡\n`
@@ -224,11 +248,14 @@ function applyRunExit(payload: RunExitPayload): void {
     setRunStatus(duration ? `COMPLETE // ${duration}` : 'COMPLETE', 'success')
   } else if (payload.reason === 'stopped') {
     setRunStatus('ABORTED', 'stopped')
+    triggerGlitch('abort')
   } else if (payload.reason === 'output-limit') {
     setRunStatus('BUFFER LIMIT', 'error')
+    triggerGlitch('error')
   } else {
     const codeText = payload.code === null ? '' : ` // CODE ${payload.code}`
     setRunStatus(`FAILED${codeText}`, 'error')
+    triggerGlitch('error')
   }
 }
 
@@ -259,10 +286,12 @@ async function runCode(trigger: RunTrigger = 'manual'): Promise<void> {
     if (!result.ok) {
       appendOutput(`${result.error}\n`, 'stderr')
       setRunStatus('COMPILE ERROR', 'error')
+      triggerGlitch('error')
       flushAutoRun()
       return
     }
 
+    triggerGlitch('run')
     const earlyExit = completedRuns.get(result.runId)
     if (earlyExit) {
       completedRuns.delete(result.runId)
@@ -504,6 +533,7 @@ function onLanguageServiceStatus(result: LanguageServiceProbeResult): void {
   lastLanguageServiceFailure = result.message
   appendOutput(`\n[EDITOR LANGUAGE SERVICE] ${result.message}\n`, 'stderr')
   showToast('Monaco 语言服务加载失败；悬浮说明和格式化可能不可用', 'error')
+  triggerGlitch('error')
 }
 
 function maybeFinishBoot(): void {
@@ -565,7 +595,21 @@ watch(clearOutputOnRun, (value) => writeStorage('offlineJsLab.clearOutputOnRun',
 watch([fileName, dirty], () => {
   document.title = `${dirty.value ? '● ' : ''}${fileName.value} — Offline JS Lab`
 })
-watch(running, (value) => document.documentElement.classList.toggle('is-running', value))
+watch(running, (value) => {
+  document.documentElement.classList.toggle('is-running', value)
+  if (value) {
+    if (runClockTimer === null) {
+      runStartedAt = performance.now()
+      runElapsedMs.value = 0
+      runClockTimer = window.setInterval(() => {
+        runElapsedMs.value = performance.now() - runStartedAt
+      }, 100)
+    }
+  } else if (runClockTimer !== null) {
+    window.clearInterval(runClockTimer)
+    runClockTimer = null
+  }
+})
 
 const unsubscribers: Array<() => void> = []
 
@@ -614,6 +658,8 @@ onBeforeUnmount(() => {
   cancelAutoRun()
   if (clockTimer !== null) window.clearInterval(clockTimer)
   if (bootHideTimer !== null) window.clearTimeout(bootHideTimer)
+  if (glitchTimer !== null) window.clearTimeout(glitchTimer)
+  if (runClockTimer !== null) window.clearInterval(runClockTimer)
   for (const timer of toastTimers.values()) window.clearTimeout(timer)
   for (const unsubscribe of unsubscribers) unsubscribe()
   window.removeEventListener('keydown', onGlobalKeydown)
@@ -640,16 +686,16 @@ onBeforeUnmount(() => {
 
       <nav class="file-actions" aria-label="文件操作">
         <button class="toolbar-button" type="button" :disabled="fileActionsBlocked" title="新建 Cmd/Ctrl+N" @click="newFile">
-          <span class="toolbar-button__glyph">＋</span><b>NEW</b>
+          <svg class="toolbar-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg><b>NEW</b>
         </button>
         <button class="toolbar-button" type="button" :disabled="fileActionsBlocked" title="打开 Cmd/Ctrl+O" @click="openFile">
-          <span class="toolbar-button__glyph">↗</span><b>OPEN</b>
+          <svg class="toolbar-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" /></svg><b>OPEN</b>
         </button>
         <button class="toolbar-button" type="button" title="保存 Cmd/Ctrl+S" @click="saveFile(false)">
-          <span class="toolbar-button__glyph">◇</span><b>SAVE</b>
+          <svg class="toolbar-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg><b>SAVE</b>
         </button>
         <button class="toolbar-button toolbar-button--compact" type="button" title="另存为 Cmd/Ctrl+Shift+S" @click="saveFile(true)">
-          <span class="toolbar-button__glyph">⇩</span><b>SAVE AS</b>
+          <svg class="toolbar-button__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5M12 15V3" /></svg><b>SAVE AS</b>
         </button>
       </nav>
 
@@ -664,7 +710,7 @@ onBeforeUnmount(() => {
 
         <div class="mode-switch" aria-label="运行模式">
           <button type="button" :class="{ active: runMode === 'manual' }" @click="setRunMode('manual')">MANUAL</button>
-          <button type="button" :class="{ active: runMode === 'live' }" @click="setRunMode('live')">
+          <button type="button" :class="{ active: runMode === 'live', pending: pendingAutoRun && runMode === 'live' }" @click="setRunMode('live')">
             <i aria-hidden="true" />LIVE
           </button>
         </div>
@@ -677,7 +723,7 @@ onBeforeUnmount(() => {
           ABORT
         </button>
         <button class="matrix-button" type="button" title="包与工作区" @click="packageDialogVisible = true">
-          <span aria-hidden="true">⌬</span><b>MATRIX</b>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /></svg><b>MATRIX</b>
         </button>
       </div>
     </header>
@@ -741,7 +787,7 @@ onBeforeUnmount(() => {
       <OutputConsole
         :chunks="outputChunks"
         :revision="outputRevision"
-        :status-label="runStatusLabel"
+        :status-label="runStatusDisplay"
         :status-kind="runStatusKind"
         :clear-on-run="clearOutputOnRun"
         @update:clear-on-run="clearOutputOnRun = $event"
@@ -790,6 +836,8 @@ onBeforeUnmount(() => {
     />
 
     <ToastStack :toasts="toasts" />
+
+    <div v-if="glitchBurst" :key="glitchSeq" class="glitch-burst" :class="`glitch-burst--${glitchBurst}`" aria-hidden="true" />
 
     <Transition name="boot-fade">
       <div v-if="bootVisible" class="boot-screen" role="status" aria-live="polite">

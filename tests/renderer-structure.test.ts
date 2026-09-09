@@ -61,7 +61,7 @@ describe('Vue renderer architecture', () => {
 
   it('显式启用悬浮、右键菜单、格式化和 Windows 注释快捷键兜底', () => {
     expect(monacoEditor).toMatch(/contextmenu:\s*true/)
-    expect(monacoEditor).toMatch(/hover:\s*\{[\s\S]*enabled:\s*true/)
+    expect(monacoEditor).toMatch(/hover:\s*\{[\s\S]*enabled:\s*('on'|true)/)
     expect(monacoEditor).toMatch(/editor\.action\.commentLine/)
     expect(monacoEditor).toMatch(/editor\.action\.blockComment/)
     expect(monacoEditor).toMatch(/editor\.action\.formatDocument/)

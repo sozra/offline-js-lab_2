@@ -170,7 +170,7 @@ onMounted(() => {
     automaticLayout: false,
     contextmenu: true,
     hover: {
-      enabled: true,
+      enabled: 'on',
       delay: 250,
       sticky: true
     },

@@ -31,7 +31,7 @@
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("../assets/fonts/rajdhani-600.woff2") format("woff2");
+  src: url("./rajdhani-600-CXCVEoA9.woff2") format("woff2");
 }
 
 @font-face {
@@ -39,7 +39,7 @@
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("../assets/fonts/rajdhani-700.woff2") format("woff2");
+  src: url("./rajdhani-700-BPDUZo87.woff2") format("woff2");
 }
 
 *,
