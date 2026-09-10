@@ -101,9 +101,13 @@ describe('Vue renderer architecture', () => {
     expect(packageJson.devDependencies['vue-tsc']).not.toBe('3.1.6')
   })
 
-  it('不包含运行超时设置，并包含可降低动态效果的样式', () => {
+  it('不包含运行超时设置，且不根据系统偏好降低动态效果', () => {
     expect(app).not.toMatch(/timeoutMs|offlineJsLab\.timeout/)
-    expect(css).toMatch(/prefers-reduced-motion: reduce/)
+
+    // 自用项目：不根据系统减少动态效果设置关闭动画。
+    expect(app).not.toMatch(/prefers-reduced-motion/)
+    expect(css).not.toMatch(/prefers-reduced-motion/)
+
     expect(css).toMatch(/--cyber-yellow:/)
     expect(css).toMatch(/boot-screen/)
   })

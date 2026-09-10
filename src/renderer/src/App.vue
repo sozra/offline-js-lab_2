@@ -185,7 +185,6 @@ const runStatusDisplay = computed(() => {
 })
 
 function triggerGlitch(kind: 'run' | 'error' | 'abort'): void {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   if (glitchTimer !== null) window.clearTimeout(glitchTimer)
   glitchBurst.value = kind
   glitchSeq.value += 1

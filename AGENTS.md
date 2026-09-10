@@ -335,7 +335,7 @@ import 'monaco-editor/features/register.all'
 - hover/active 反馈保持 100–200 ms；
 - glitch 只用于 Logo 或状态，不用于正文；
 - 运行动画不能导致布局抖动；
-- 必须维护 `prefers-reduced-motion`；
+- 所有平台统一启用完整动画，不增加根据系统减少动态效果设置禁用动画的逻辑；
 - 文字对比度和 focus-visible 不得删除；
 - 禁止为了“更像游戏”引入远程字体、图片、视频或音效。
 

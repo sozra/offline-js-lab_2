@@ -2764,28 +2764,6 @@ html:not(.is-running) .console-scan {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
-
-  .scanline-layer::after,
-  .console-scan,
-  .splitter-pulse,
-  .boot-scan {
-    display: none;
-  }
-
-  .glitch-burst {
-    display: none;
-  }
-}
-
 /* Renderer bootstrap fallback ------------------------------------------------ */
 .renderer-loading,
 .startup-failure {
