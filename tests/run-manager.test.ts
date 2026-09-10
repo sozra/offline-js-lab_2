@@ -26,7 +26,7 @@ type Sent =
   | { channel: 'run:output'; payload: RunOutputPayload }
   | { channel: 'run:exit'; payload: RunExitPayload }
 
-async function createFixture(compiledSource: string): Promise<{
+async function createFixture(compiledSource?: string): Promise<{
   root: string
   manager: RunManager
 }> {
@@ -43,18 +43,22 @@ async function createFixture(compiledSource: string): Promise<{
     getNodeModulesPath: () => nodeModulesPath
   } as WorkspaceService
 
+  const getCompiler = compiledSource === undefined
+    ? undefined
+    : () => ({
+        async build(options: { outfile?: string }) {
+          if (!options.outfile) throw new Error('测试编译器缺少 outfile。')
+          await fs.writeFile(options.outfile, compiledSource, 'utf8')
+          return { errors: [], warnings: [] }
+        }
+      } as unknown as Pick<typeof import('esbuild'), 'build'>)
+
   const manager = new RunManager(
     workspace,
     () => path.resolve(testDirectory, '..', 'src', 'main', 'runner.cjs'),
     undefined,
     () => ({ command: process.execPath, argsPrefix: [], source: 'test' }),
-    () => ({
-      async build(options: { outfile?: string }) {
-        if (!options.outfile) throw new Error('测试编译器缺少 outfile。')
-        await fs.writeFile(options.outfile, compiledSource, 'utf8')
-        return { errors: [], warnings: [] }
-      }
-    } as unknown as Pick<typeof import('esbuild'), 'build'>)
+    getCompiler
   )
 
   return { root, manager }
@@ -71,6 +75,98 @@ function createWebContents(sent: Sent[]): {
 }
 
 describe('RunManager', () => {
+  it('为显式打印和纯表达式输出传递对应的源代码行号', async () => {
+    const fixture = await createFixture()
+    const sent: Sent[] = []
+    const result = await fixture.manager.start(createWebContents(sent), {
+      language: 'typescript',
+      code: [
+        'const value: number = 21',
+        'value * 2',
+        'console.log("mapped", await Promise.resolve(value))'
+      ].join('\n'),
+      sourceFilePath: null
+    })
+
+    expect(result.ok).toBe(true)
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+
+    const output = sent.filter(
+      (item): item is Extract<Sent, { channel: 'run:output' }> => item.channel === 'run:output'
+    )
+    expect(output.filter((item) => item.payload.sourceLine)).toHaveLength(2)
+    expect(output).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        payload: expect.objectContaining({ sourceLine: 2, stream: 'expression', text: '⇒ 42\n' })
+      }),
+      expect.objectContaining({
+        payload: expect.objectContaining({ sourceLine: 3, stream: 'stdout', text: 'mapped 21\n' })
+      })
+    ]))
+  })
+
+  it('不接管同名局部 console，并保持参数只求值一次', async () => {
+    const fixture = await createFixture()
+    const sent: Sent[] = []
+    const testCode = [
+      'let calls = 0',
+      'const console = { log(value: number) { calls += 1; return value } }',
+      'const result = console.log(5)',
+      ';[calls, result]'
+    ].join('\n')
+    const result = await fixture.manager.start(createWebContents(sent), {
+      language: 'typescript',
+      code: testCode,
+      sourceFilePath: null
+    })
+
+    expect(result.ok).toBe(true)
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+
+    const positioned = sent.filter(
+      (item): item is Extract<Sent, { channel: 'run:output' }> =>
+        item.channel === 'run:output' && Boolean(item.payload.sourceLine)
+    )
+    expect(positioned).toHaveLength(1)
+    expect(positioned[0]?.payload).toMatchObject({
+      sourceLine: 4,
+      stream: 'expression',
+      text: '⇒ [ 1, 5 ]\n'
+    })
+  })
+
+  it('隐式显示独立同步与异步调用的非 undefined 返回值', async () => {
+    const fixture = await createFixture()
+    const sent: Sent[] = []
+    const testCode = [
+      'let effects = 0',
+      'function double(value: number) { effects += 1; return value * 2 }',
+      'function touch() { effects += 1 }',
+      'double(21)',
+      'touch()',
+      'await Promise.resolve(7)',
+      'effects'
+    ].join('\n')
+    const result = await fixture.manager.start(createWebContents(sent), {
+      language: 'typescript',
+      code: testCode,
+      sourceFilePath: null
+    })
+
+    expect(result.ok).toBe(true)
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+
+    const positioned = sent.filter(
+      (item): item is Extract<Sent, { channel: 'run:output' }> =>
+        item.channel === 'run:output' && Boolean(item.payload.sourceLine)
+    )
+    expect(positioned.map((item) => item.payload)).toEqual([
+      expect.objectContaining({ sourceLine: 4, stream: 'expression', text: '⇒ 42\n' }),
+      expect.objectContaining({ sourceLine: 6, stream: 'expression', text: '⇒ 7\n' }),
+      expect.objectContaining({ sourceLine: 7, stream: 'expression', text: '⇒ 2\n' })
+    ])
+  })
+
   it('普通脚本打印后由系统 Node 自然结束', async () => {
     const fixture = await createFixture('console.log("hello from node");\n')
     const sent: Sent[] = []

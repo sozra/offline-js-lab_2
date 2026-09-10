@@ -1,7 +1,7 @@
 export type ScriptLanguage = 'typescript' | 'javascript'
 export type RunMode = 'manual' | 'live'
 export type RunTrigger = 'manual' | 'auto'
-export type OutputStream = 'stdout' | 'stderr' | 'system' | 'package' | 'muted'
+export type OutputStream = 'stdout' | 'stderr' | 'expression' | 'system' | 'package' | 'muted'
 export type RunExitReason = 'completed' | 'failed' | 'stopped' | 'output-limit' | 'app-closed'
 export type AppCommand = 'new' | 'open' | 'save' | 'save-as' | 'run' | 'stop'
 export type NpmAction = 'install' | 'sync' | 'uninstall'
@@ -70,6 +70,7 @@ export interface RunOutputPayload {
   runId: string
   stream: Exclude<OutputStream, 'package' | 'muted'>
   text: string
+  sourceLine?: number
 }
 
 export interface RunExitPayload {
@@ -157,4 +158,5 @@ export interface OutputChunk {
   id: number
   stream: OutputStream
   text: string
+  sourceLine?: number
 }

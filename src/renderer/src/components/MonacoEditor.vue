@@ -22,6 +22,7 @@ const emit = defineEmits<{
   run: []
   save: []
   open: []
+  scroll: [scrollTop: number]
   'language-service': [result: LanguageServiceProbeResult]
 }>()
 
@@ -211,6 +212,10 @@ onMounted(() => {
     emit('change', value)
   })
 
+  editor.onDidScrollChange((event) => {
+    if (event.scrollTopChanged) emit('scroll', event.scrollTop)
+  })
+
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => emit('run'))
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => emit('open'))
@@ -271,7 +276,10 @@ onBeforeUnmount(() => {
 
 defineExpose({
   focus: () => editor?.focus(),
-  layout: () => editor?.layout()
+  layout: () => editor?.layout(),
+  setScrollTop: (scrollTop: number) => {
+    editor?.setScrollTop(Math.max(0, scrollTop), monaco.editor.ScrollType.Immediate)
+  }
 })
 </script>
 

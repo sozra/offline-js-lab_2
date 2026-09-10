@@ -26,11 +26,11 @@ const packageJson = JSON.parse(read('package.json')) as {
 
 describe('Vue renderer architecture', () => {
   it('使用 Vue 3 + electron-vite + TypeScript + Monaco', () => {
-    expect(packageJson.version).toBe('0.3.3')
+    expect(packageJson.version).toBe('0.3.5')
     expect(packageJson.dependencies.vue).toBeTruthy()
     expect(packageJson.dependencies['monaco-editor']).toBe('0.56.0')
     expect(packageJson.devDependencies['electron-vite']).toBeTruthy()
-    expect(packageJson.devDependencies.typescript).toBeTruthy()
+    expect(packageJson.dependencies.typescript).toBe('5.9.3')
     expect(app).toMatch(/<script setup lang="ts">/)
     expect(app).toMatch(/<MonacoEditor/)
   })
@@ -47,6 +47,16 @@ describe('Vue renderer architecture', () => {
     expect(app).toMatch(/offlineJsLab\.clearOutputOnRun/)
     expect(app).toMatch(/if \(clearOutputOnRun\.value\) clearOutput\(\)/)
     expect(output).toMatch(/update:clearOnRun/)
+  })
+
+  it('源代码行对齐视图持久化，并与 Monaco 的固定行高和滚动位置联动', () => {
+    expect(app).toMatch(/offlineJsLab\.alignOutputToSource/)
+    expect(app).toMatch(/@source-scroll="editorRef\?\.setScrollTop\(\$event\)"/)
+    expect(output).toMatch(/LINE:SYNC/)
+    expect(output).toMatch(/ALIGNED_LINE_HEIGHT = 21/)
+    expect(monacoEditor).toMatch(/onDidScrollChange/)
+    expect(monacoEditor).toMatch(/setScrollTop/)
+    expect(css).toMatch(/\.aligned-output-row/)
   })
 
   it('Monaco 0.56 使用完整官方入口并强制单实例，避免跨平台能力退化', () => {

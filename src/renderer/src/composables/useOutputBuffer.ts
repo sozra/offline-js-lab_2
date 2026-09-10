@@ -19,7 +19,7 @@ export function useOutputBuffer(): {
   chunks: ShallowRef<OutputChunk[]>
   revision: Ref<number>
   hasOutput: ComputedRef<boolean>
-  append: (text: unknown, stream?: OutputStream) => void
+  append: (text: unknown, stream?: OutputStream, sourceLine?: number) => void
   clear: () => void
 } {
   const chunks = shallowRef<OutputChunk[]>([])
@@ -28,17 +28,28 @@ export function useOutputBuffer(): {
 
   const hasOutput = computed(() => chunks.value.length > 0)
 
-  const append = (rawText: unknown, stream: OutputStream = 'stdout'): void => {
+  const append = (
+    rawText: unknown,
+    stream: OutputStream = 'stdout',
+    sourceLine?: number
+  ): void => {
     const text = stripAnsi(rawText)
     if (!text) return
 
     const current = chunks.value
     const last = current[current.length - 1]
-    if (last && last.stream === stream && last.text.length + text.length < 128 * 1024) {
+    if (
+      last &&
+      last.stream === stream &&
+      last.sourceLine === sourceLine &&
+      last.text.length + text.length < 128 * 1024
+    ) {
       const merged: OutputChunk = { ...last, text: last.text + text }
       chunks.value = [...current.slice(0, -1), merged]
     } else {
-      chunks.value = [...current, { id: nextId++, stream, text }]
+      const chunk: OutputChunk = { id: nextId++, stream, text }
+      if (sourceLine && Number.isInteger(sourceLine)) chunk.sourceLine = sourceLine
+      chunks.value = [...current, chunk]
     }
     revision.value += 1
   }

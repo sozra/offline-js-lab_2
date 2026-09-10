@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import type { WebContents } from 'electron'
 import * as esbuild from 'esbuild'
 import { IPC } from '@shared/ipc'
@@ -19,9 +20,11 @@ import {
   describeRuntime,
   resolveNodeRuntime
 } from './runtime'
+import { instrumentSource } from './source-instrumenter'
 
 const MAX_CODE_BYTES = 2 * 1024 * 1024
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
+const MAX_STRUCTURED_FRAME_BYTES = 512 * 1024
 
 const ESM_COMPATIBILITY_BANNER = `
 import { createRequire as __offlineCreateRequire } from 'node:module';
@@ -123,7 +126,7 @@ export class RunManager {
       const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '22', 10)
       await compiler.build({
         stdin: {
-          contents: code,
+          contents: instrumentSource(code, language).code,
           loader: language === 'typescript' ? 'ts' : 'js',
           resolveDir,
           sourcefile: sourceFile
@@ -155,7 +158,7 @@ export class RunManager {
         cwd: this.workspace.getPath(),
         env: createChildEnvironment({ OFFLINE_JS_LAB: '1' }),
         shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
         windowsHide: true
       })
     } catch (error) {
@@ -173,7 +176,24 @@ export class RunManager {
     }
     this.runs.set(runId, record)
 
-    const forwardOutput = (stream: 'stdout' | 'stderr', chunk: unknown): void => {
+    const terminateForOutputLimit = (message?: string): void => {
+      const currentRecord = this.runs.get(runId)
+      if (!currentRecord || currentRecord.outputLimited) return
+      currentRecord.outputLimited = true
+      currentRecord.reason = 'output-limit'
+      send<RunOutputPayload>(webContents, IPC.runOutput, {
+        runId,
+        stream: 'system',
+        text: message ?? `\n输出超过 ${MAX_OUTPUT_BYTES / 1024 / 1024} MB，已终止执行进程。\n`
+      })
+      currentRecord.child.kill()
+    }
+
+    const forwardOutput = (
+      stream: 'stdout' | 'stderr' | 'expression',
+      chunk: unknown,
+      sourceLine?: number
+    ): void => {
       const currentRecord = this.runs.get(runId)
       if (!currentRecord || currentRecord.outputLimited) return
 
@@ -187,24 +207,67 @@ export class RunManager {
           stream,
           text: accepted.toString('utf8')
         }
+        if (sourceLine && Number.isInteger(sourceLine)) payload.sourceLine = sourceLine
         send(webContents, IPC.runOutput, payload)
       }
 
       currentRecord.outputBytes += buffer.length
       if (buffer.length > remaining) {
-        currentRecord.outputLimited = true
-        currentRecord.reason = 'output-limit'
-        send<RunOutputPayload>(webContents, IPC.runOutput, {
-          runId,
-          stream: 'system',
-          text: `\n输出超过 ${MAX_OUTPUT_BYTES / 1024 / 1024} MB，已终止执行进程。\n`
-        })
-        currentRecord.child.kill()
+        terminateForOutputLimit()
       }
     }
 
     child.stdout?.on('data', (chunk) => forwardOutput('stdout', chunk))
     child.stderr?.on('data', (chunk) => forwardOutput('stderr', chunk))
+
+    const structuredOutput = child.stdio[3]
+    if (structuredOutput && 'on' in structuredOutput) {
+      const decoder = new StringDecoder('utf8')
+      let pending = ''
+
+      const consumeRecords = (flush = false): void => {
+        const records = pending.split('\n')
+        pending = flush ? '' : (records.pop() ?? '')
+        for (const record of records) {
+          if (!record) continue
+          try {
+            const parsed = JSON.parse(record) as {
+              line?: unknown
+              stream?: unknown
+              text?: unknown
+            }
+            if (
+              !Number.isInteger(parsed.line) ||
+              Number(parsed.line) < 1 ||
+              (parsed.stream !== 'stdout' &&
+                parsed.stream !== 'stderr' &&
+                parsed.stream !== 'expression') ||
+              typeof parsed.text !== 'string'
+            ) {
+              throw new Error('invalid record')
+            }
+            forwardOutput(parsed.stream, parsed.text, Number(parsed.line))
+          } catch {
+            forwardOutput('stderr', '[内部输出协议错误：已忽略一条无法解析的行定位记录。]\n')
+          }
+        }
+      }
+
+      structuredOutput.on('data', (chunk) => {
+        pending += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+        if (Buffer.byteLength(pending, 'utf8') > MAX_STRUCTURED_FRAME_BYTES) {
+          pending = ''
+          terminateForOutputLimit('\n行定位输出记录异常过大，已终止执行进程。\n')
+          return
+        }
+        consumeRecords()
+      })
+      structuredOutput.on('end', () => {
+        pending += decoder.end()
+        if (pending) pending += '\n'
+        consumeRecords(true)
+      })
+    }
 
     child.once('error', (error) => {
       const currentRecord = this.runs.get(runId)

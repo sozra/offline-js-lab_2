@@ -10,6 +10,7 @@ const requiredFiles = [
   'electron.vite.config.ts',
   'scripts/ensure-electron.mjs',
   'src/main/index.ts',
+  'src/main/source-instrumenter.ts',
   'src/main/run-manager.ts',
   'src/main/npm-manager.ts',
   'src/main/runner.cjs',
@@ -30,10 +31,10 @@ for (const relativePath of requiredFiles) {
 }
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-for (const name of ['vue', 'monaco-editor', 'esbuild']) {
+for (const name of ['vue', 'monaco-editor', 'esbuild', 'typescript']) {
   if (!packageJson.dependencies?.[name]) failures.push(`dependencies 缺少 ${name}`)
 }
-for (const name of ['electron', 'electron-vite', '@vitejs/plugin-vue', 'typescript', 'vue-tsc', 'vitest']) {
+for (const name of ['electron', 'electron-vite', '@vitejs/plugin-vue', 'vue-tsc', 'vitest']) {
   if (!packageJson.devDependencies?.[name]) failures.push(`devDependencies 缺少 ${name}`)
 }
 
@@ -57,6 +58,7 @@ if (/https?:\/\//i.test(rendererSource)) failures.push('Renderer 不得依赖远
 if (/timeoutMs|offlineJsLab\.timeout/.test(rendererSource)) failures.push('Renderer 中检测到已移除的运行超时逻辑。')
 if (!/prefers-reduced-motion/.test(rendererSource)) failures.push('设计系统缺少 prefers-reduced-motion。')
 if (!/offlineJsLab\.clearOutputOnRun/.test(rendererSource)) failures.push('缺少运行前清空持久化键。')
+if (!/offlineJsLab\.alignOutputToSource/.test(rendererSource)) failures.push('缺少源代码行输出对齐持久化键。')
 if (!/<script setup lang="ts">/.test(rendererSource)) failures.push('Vue Renderer 未检测到 TypeScript script setup。')
 
 

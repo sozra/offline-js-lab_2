@@ -42,6 +42,9 @@ const runMode = ref<RunMode>(
 const clearOutputOnRun = ref(
   readBooleanStorage('offlineJsLab.clearOutputOnRun', true)
 )
+const alignOutputToSource = ref(
+  readBooleanStorage('offlineJsLab.alignOutputToSource', false)
+)
 const fallbackCode = language.value === 'typescript' ? DEFAULT_TYPESCRIPT : DEFAULT_JAVASCRIPT
 const code = ref(readStorage('offlineJsLab.code', fallbackCode))
 const filePath = ref<string | null>(null)
@@ -50,6 +53,7 @@ const dirty = ref(false)
 const editorRef = ref<InstanceType<typeof MonacoEditor>>()
 const splitHost = ref<HTMLElement>()
 const editorReady = ref(false)
+const editorScrollTop = ref(0)
 const languageServiceMessage = ref('LANGUAGE SERVICE LINKING')
 const typeIndexMessage = ref('TYPE INDEX PENDING')
 const editorMessage = computed(() => `${languageServiceMessage.value} // ${typeIndexMessage.value}`)
@@ -127,6 +131,7 @@ const runDisabled = computed(() => !editorReady.value || running.value || npmBus
 const workspaceLabel = computed(() => packageState.value?.workspacePath || 'WORKSPACE OFFLINE')
 const runShortcut = computed(() => (platform.value === 'darwin' ? '⌘↵' : 'CTRL↵'))
 const modeLabel = computed(() => (runMode.value === 'live' ? 'LIVE LINK' : 'MANUAL LINK'))
+const editorLineCount = computed(() => code.value.split(/\r\n|\r|\n/).length)
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -593,6 +598,7 @@ watch(runMode, (value) => {
   else cancelAutoRun()
 })
 watch(clearOutputOnRun, (value) => writeStorage('offlineJsLab.clearOutputOnRun', value))
+watch(alignOutputToSource, (value) => writeStorage('offlineJsLab.alignOutputToSource', value))
 watch([fileName, dirty], () => {
   document.title = `${dirty.value ? '● ' : ''}${fileName.value} — Offline JS Lab`
 })
@@ -620,7 +626,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKeydown)
 
   unsubscribers.push(
-    api.onRunOutput(({ text, stream }) => appendOutput(text, stream as OutputStream)),
+    api.onRunOutput(({ text, stream, sourceLine }) =>
+      appendOutput(text, stream as OutputStream, sourceLine)
+    ),
     api.onRunExit(handleRunExit),
     api.onPackageOutput(({ text, stream }) => {
       appendOutput(text, stream === 'stderr' ? 'stderr' : 'package')
@@ -765,6 +773,7 @@ onBeforeUnmount(() => {
             @run="runCode('manual')"
             @save="saveFile(false)"
             @open="openFile"
+            @scroll="editorScrollTop = $event"
           />
         </div>
         <div class="panel-corner panel-corner--bottom" aria-hidden="true" />
@@ -795,7 +804,12 @@ onBeforeUnmount(() => {
         :status-label="runStatusDisplay"
         :status-kind="runStatusKind"
         :clear-on-run="clearOutputOnRun"
+        :align-to-source="alignOutputToSource"
+        :editor-line-count="editorLineCount"
+        :editor-scroll-top="editorScrollTop"
         @update:clear-on-run="clearOutputOnRun = $event"
+        @update:align-to-source="alignOutputToSource = $event"
+        @source-scroll="editorRef?.setScrollTop($event)"
         @clear="clearOutput"
       />
     </main>

@@ -1,8 +1,12 @@
-# Offline JS Lab v0.3.3
+# Offline JS Lab v0.3.5
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
 
 v0.3.x 将此前的原生 HTML/CSS/JavaScript Renderer 重构为 Vue 技术栈，并加入一套受《赛博朋克 2077》界面语言启发的原创 Cyberdeck UI。项目没有使用游戏字体、Logo、截图、音效或其他专有素材。
+
+v0.3.5 把隐式输出扩展到独立函数调用：`calculate()` 和 `await loadData()` 的返回值未被赋值或传给其他函数时，会像外层包了 `console.log()` 一样显示 `⇒` 结果。调用只执行一次，返回 `undefined` 时保持安静，显式 `console.*` 也不会重复输出。
+
+v0.3.4 增加源代码行对齐输出与隐式纯表达式结果。`LINE:SYNC` 开启时，显式 `console.log/info/warn/error/debug` 和隐式值会按 Monaco 的源行高度排列，并与编辑器双向同步滚动；关闭后仍显示原有的完整时间顺序输出。像 `value`、`value > 10`、`obj.key` 这样的无副作用表达式会直接显示结果，无需再包一层 `console.log()`。
 
 v0.3.3 修复 Windows 环境中 Monaco 可能只剩语法高亮、却缺少悬浮说明、格式化菜单和 `Ctrl + /` 注释快捷键的问题。Renderer 改用 Monaco 0.56 完整入口，显式开启 JS/TS 语言能力、强制 Vite 单实例解析，并增加 TypeScript Worker 连通性自检与跨键盘布局快捷键兜底。
 
@@ -13,6 +17,8 @@ v0.3.1 修复 Electron 42+ 延迟下载二进制与 electron-vite 5 启动方式
 ## 主要能力
 
 - 左侧 Monaco Editor 编写 JavaScript / TypeScript，右侧查看 stdout、stderr、编译信息和 npm 输出。
+- 可用 `LINE:SYNC` 将打印结果与对应源代码行对齐；编辑器与输出区保持相同行高并同步滚动。
+- 裸写纯表达式或有非 `undefined` 返回值的独立函数调用，即可查看 `⇒` 结果。
 - 中间分隔条可拖动、方向键微调，双击或按 Home 恢复 50:50。
 - 支持手动运行，以及停止输入约 500 ms 后自动执行的实时运行。
 - 可设置每次手动或实时运行前是否清空输出，也可随时手动清空。
@@ -258,9 +264,39 @@ npm install lodash
 offlineJsLab.clearOutputOnRun
 ```
 
+### LINE:SYNC 与隐式表达式结果
+
+输出区顶部的 `LINE:SYNC` 控制显示方式：
+
+- 开启：带源位置的输出按源代码行排列，行高与 Monaco 的 21 px 行高一致；滚动任意一侧会同步另一侧；
+- 关闭：恢复按实际发生时间追加的完整输出；
+- 编译错误、`process.stdout.write()`、依赖包内部打印等没有可靠源位置的内容，会在对齐模式的 `UNMAPPED` 区显示；
+- 该开关只改变输出展示，不改变脚本的执行次序。
+
+以下表达式默认会像 Scratchpad/REPL 一样显示结果：
+
+```ts
+const price = 42
+price                         // ⇒ 42
+price > 20                    // ⇒ true
+const summary = { price, active: true }
+summary                       // ⇒ { price: 42, active: true }
+function double(value: number) { return value * 2 }
+double(price)                 // ⇒ 84
+await Promise.resolve(price)  // ⇒ 42
+```
+
+独立函数调用和独立 `await` 调用会显示非 `undefined` 返回值；返回 `undefined` 的动作型函数只执行、不增加输出。已赋值的调用、作为参数传入的内层调用、`new`、赋值、自增/自减、`yield`、`delete` 和 `void` 不会被额外打印。显式的 `console.*` 也不会被隐式输出重复接管。
+
+显示偏好保存为：
+
+```text
+offlineJsLab.alignOutputToSource
+```
+
 ## 没有运行超时
 
-v0.3.3 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
+v0.3.5 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
 
 仍保留单次 8 MB 输出上限，避免无限打印拖垮界面。这是缓冲保护，不是超时。
 
@@ -270,6 +306,7 @@ v0.3.3 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子
 src/
 ├─ main/
 │  ├─ index.ts               Electron 生命周期、窗口、IPC
+│  ├─ source-instrumenter.ts 源行标注与隐式输出识别
 │  ├─ run-manager.ts         esbuild 与 Node 子进程
 │  ├─ npm-manager.ts         npm CLI 操作
 │  ├─ runtime.ts             Node/npm 路径解析
@@ -338,6 +375,7 @@ Renderer 使用 `localStorage` 保存：
 | `offlineJsLab.language` | JS / TS | `typescript` |
 | `offlineJsLab.runMode` | 手动 / 实时 | `manual` |
 | `offlineJsLab.clearOutputOnRun` | 运行前清空 | `true` |
+| `offlineJsLab.alignOutputToSource` | 输出按源代码行对齐 | `false` |
 | `offlineJsLab.splitRatio` | 左右分栏比例 | `0.5` |
 
 工作区路径存放在 Electron `userData/settings.json`，而不是 Renderer。

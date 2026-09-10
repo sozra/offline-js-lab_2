@@ -6,7 +6,9 @@ const node_url = require("node:url");
 const electron = require("electron");
 const node_child_process = require("node:child_process");
 const crypto = require("node:crypto");
+const node_string_decoder = require("node:string_decoder");
 const esbuild = require("esbuild");
+const ts = require("typescript");
 function _interopNamespaceDefault(e) {
   const n = Object.create(null, { [Symbol.toStringTag]: { value: "Module" } });
   if (e) {
@@ -482,8 +484,150 @@ class NpmManager {
 function toErrorMessage$1(error) {
   return error instanceof Error ? error.message : String(error);
 }
+const LINE_AWARE_CONSOLE_METHODS = /* @__PURE__ */ new Set(["debug", "error", "info", "log", "warn"]);
+function sourceLineOf(sourceFile, node) {
+  return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+}
+function getConsoleMethod(node) {
+  const callee = node.expression;
+  if (node.questionDotToken) return null;
+  if (ts.isPropertyAccessExpression(callee) && !callee.questionDotToken && ts.isIdentifier(callee.expression) && callee.expression.text === "console" && LINE_AWARE_CONSOLE_METHODS.has(callee.name.text)) {
+    return callee.name.text;
+  }
+  if (ts.isElementAccessExpression(callee) && !callee.questionDotToken && ts.isIdentifier(callee.expression) && callee.expression.text === "console" && callee.argumentExpression && ts.isStringLiteral(callee.argumentExpression) && LINE_AWARE_CONSOLE_METHODS.has(callee.argumentExpression.text)) {
+    return callee.argumentExpression.text;
+  }
+  return null;
+}
+function unwrapTransparentExpression(expression) {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+}
+function isDirectConsoleCall(node) {
+  const callee = unwrapTransparentExpression(node.expression);
+  return (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) && ts.isIdentifier(callee.expression) && callee.expression.text === "console";
+}
+function isDirectivePrologue(statement) {
+  if (!ts.isStringLiteral(statement.expression)) return false;
+  const parent = statement.parent;
+  let statements;
+  if (ts.isSourceFile(parent)) {
+    statements = parent.statements;
+  } else if (ts.isBlock(parent) && ts.isFunctionLike(parent.parent)) {
+    statements = parent.statements;
+  }
+  if (!statements) return false;
+  for (const current of statements) {
+    if (current === statement) return true;
+    if (!ts.isExpressionStatement(current) || !ts.isStringLiteral(current.expression)) return false;
+  }
+  return false;
+}
+function isImplicitOutputCandidate(expression) {
+  let excluded = false;
+  const visit = (node) => {
+    if (excluded) return;
+    if (ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isAwaitExpression(node) || ts.isYieldExpression(node) || ts.isTaggedTemplateExpression(node) || ts.isDeleteExpression(node) || ts.isVoidExpression(node) || ts.isPostfixUnaryExpression(node) || ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node)) {
+      excluded = true;
+      return;
+    }
+    if (ts.isPrefixUnaryExpression(node) && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+      excluded = true;
+      return;
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      excluded = true;
+      return;
+    }
+    if (ts.isFunctionLike(node) || ts.isClassExpression(node)) {
+      if (node === expression) excluded = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return !excluded;
+}
+function getImplicitOutputKind(expression) {
+  const unwrapped = unwrapTransparentExpression(expression);
+  const possibleCall = ts.isAwaitExpression(unwrapped) ? unwrapTransparentExpression(unwrapped.expression) : unwrapped;
+  if (ts.isCallExpression(possibleCall)) {
+    return isDirectConsoleCall(possibleCall) ? null : "call";
+  }
+  return isImplicitOutputCandidate(expression) ? "value" : null;
+}
+function applyEdits(code, edits) {
+  const ordered = [...edits].sort(
+    (left, right) => right.start - left.start || right.end - left.end
+  );
+  let instrumented = code;
+  for (const edit of ordered) {
+    instrumented = instrumented.slice(0, edit.start) + edit.text + instrumented.slice(edit.end);
+  }
+  return instrumented;
+}
+function instrumentSource(code, language) {
+  const sourceFile = ts.createSourceFile(
+    language === "typescript" ? "scratch.ts" : "scratch.js",
+    code,
+    ts.ScriptTarget.Latest,
+    true,
+    language === "typescript" ? ts.ScriptKind.TS : ts.ScriptKind.JS
+  );
+  const edits = [];
+  const consoleLines = /* @__PURE__ */ new Set();
+  const implicitLines = /* @__PURE__ */ new Set();
+  const visit = (node) => {
+    if (ts.isCallExpression(node)) {
+      const method = getConsoleMethod(node);
+      if (method) {
+        const line = sourceLineOf(sourceFile, node);
+        const originalCallee = node.expression.getText(sourceFile);
+        consoleLines.add(line);
+        edits.push(
+          {
+            start: node.expression.getStart(sourceFile),
+            end: node.expression.end,
+            text: "globalThis.__offlineJsLabConsole"
+          },
+          {
+            start: node.arguments.pos,
+            end: node.arguments.pos,
+            text: `${line}, ${JSON.stringify(method)}, ${originalCallee}, console` + (node.arguments.length ? ", " : "")
+          }
+        );
+      }
+    }
+    if (ts.isExpressionStatement(node) && !isDirectivePrologue(node)) {
+      const outputKind = getImplicitOutputKind(node.expression);
+      if (outputKind) {
+        const line = sourceLineOf(sourceFile, node.expression);
+        implicitLines.add(line);
+        edits.push(
+          {
+            start: node.expression.getStart(sourceFile),
+            end: node.expression.getStart(sourceFile),
+            text: outputKind === "call" ? `globalThis.__offlineJsLabInspectCall(${line}, (` : `globalThis.__offlineJsLabInspect(${line}, (`
+          },
+          { start: node.expression.end, end: node.expression.end, text: "))" }
+        );
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return {
+    code: applyEdits(code, edits),
+    consoleLines: [...consoleLines].sort((left, right) => left - right),
+    implicitLines: [...implicitLines].sort((left, right) => left - right)
+  };
+}
 const MAX_CODE_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const MAX_STRUCTURED_FRAME_BYTES = 512 * 1024;
 const ESM_COMPATIBILITY_BANNER = `
 import { createRequire as __offlineCreateRequire } from 'node:module';
 import { fileURLToPath as __offlineFileURLToPath } from 'node:url';
@@ -550,7 +694,7 @@ class RunManager {
       const nodeMajor = Number.parseInt(process.versions.node.split(".")[0] ?? "22", 10);
       await compiler.build({
         stdin: {
-          contents: code,
+          contents: instrumentSource(code, language).code,
           loader: language === "typescript" ? "ts" : "js",
           resolveDir,
           sourcefile: sourceFile
@@ -580,7 +724,7 @@ class RunManager {
         cwd: this.workspace.getPath(),
         env: createChildEnvironment({ OFFLINE_JS_LAB: "1" }),
         shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe", "pipe"],
         windowsHide: true
       });
     } catch (error) {
@@ -596,7 +740,21 @@ class RunManager {
       outputLimited: false
     };
     this.runs.set(runId, record);
-    const forwardOutput = (stream, chunk) => {
+    const terminateForOutputLimit = (message) => {
+      const currentRecord = this.runs.get(runId);
+      if (!currentRecord || currentRecord.outputLimited) return;
+      currentRecord.outputLimited = true;
+      currentRecord.reason = "output-limit";
+      send$1(webContents, IPC.runOutput, {
+        runId,
+        stream: "system",
+        text: message ?? `
+输出超过 ${MAX_OUTPUT_BYTES / 1024 / 1024} MB，已终止执行进程。
+`
+      });
+      currentRecord.child.kill();
+    };
+    const forwardOutput = (stream, chunk, sourceLine) => {
       const currentRecord = this.runs.get(runId);
       if (!currentRecord || currentRecord.outputLimited) return;
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
@@ -608,24 +766,51 @@ class RunManager {
           stream,
           text: accepted.toString("utf8")
         };
+        if (sourceLine && Number.isInteger(sourceLine)) payload2.sourceLine = sourceLine;
         send$1(webContents, IPC.runOutput, payload2);
       }
       currentRecord.outputBytes += buffer.length;
       if (buffer.length > remaining) {
-        currentRecord.outputLimited = true;
-        currentRecord.reason = "output-limit";
-        send$1(webContents, IPC.runOutput, {
-          runId,
-          stream: "system",
-          text: `
-输出超过 ${MAX_OUTPUT_BYTES / 1024 / 1024} MB，已终止执行进程。
-`
-        });
-        currentRecord.child.kill();
+        terminateForOutputLimit();
       }
     };
     child.stdout?.on("data", (chunk) => forwardOutput("stdout", chunk));
     child.stderr?.on("data", (chunk) => forwardOutput("stderr", chunk));
+    const structuredOutput = child.stdio[3];
+    if (structuredOutput && "on" in structuredOutput) {
+      const decoder = new node_string_decoder.StringDecoder("utf8");
+      let pending = "";
+      const consumeRecords = (flush = false) => {
+        const records = pending.split("\n");
+        pending = flush ? "" : records.pop() ?? "";
+        for (const record2 of records) {
+          if (!record2) continue;
+          try {
+            const parsed = JSON.parse(record2);
+            if (!Number.isInteger(parsed.line) || Number(parsed.line) < 1 || parsed.stream !== "stdout" && parsed.stream !== "stderr" && parsed.stream !== "expression" || typeof parsed.text !== "string") {
+              throw new Error("invalid record");
+            }
+            forwardOutput(parsed.stream, parsed.text, Number(parsed.line));
+          } catch {
+            forwardOutput("stderr", "[内部输出协议错误：已忽略一条无法解析的行定位记录。]\n");
+          }
+        }
+      };
+      structuredOutput.on("data", (chunk) => {
+        pending += decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+        if (Buffer.byteLength(pending, "utf8") > MAX_STRUCTURED_FRAME_BYTES) {
+          pending = "";
+          terminateForOutputLimit("\n行定位输出记录异常过大，已终止执行进程。\n");
+          return;
+        }
+        consumeRecords();
+      });
+      structuredOutput.on("end", () => {
+        pending += decoder.end();
+        if (pending) pending += "\n";
+        consumeRecords(true);
+      });
+    }
     child.once("error", (error) => {
       const currentRecord = this.runs.get(runId);
       if (currentRecord) currentRecord.reason = "failed";
