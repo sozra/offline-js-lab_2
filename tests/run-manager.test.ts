@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RunManager } from '../src/main/run-manager'
 import type { WorkspaceService } from '../src/main/workspace'
 import type { RunExitPayload, RunOutputPayload } from '../src/shared/types'
@@ -29,6 +29,7 @@ type Sent =
 async function createFixture(compiledSource?: string): Promise<{
   root: string
   manager: RunManager
+  workspace: WorkspaceService
 }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'offline-js-lab-run-'))
   roots.push(root)
@@ -61,7 +62,7 @@ async function createFixture(compiledSource?: string): Promise<{
     getCompiler
   )
 
-  return { root, manager }
+  return { root, manager, workspace }
 }
 
 function createWebContents(sent: Sent[]): {
@@ -75,6 +76,31 @@ function createWebContents(sent: Sent[]): {
 }
 
 describe('RunManager', () => {
+  it('esbuild target 使用探测的执行 Node 版本而不是宿主版本', async () => {
+    const fixture = await createFixture()
+    const build = vi.fn(async (options: import('esbuild').BuildOptions) => {
+      await fs.writeFile(options.outfile!, 'console.log("target checked")', 'utf8')
+      return { errors: [], warnings: [] }
+    })
+    const detectedVersion = process.versions.node === '18.20.8' ? '20.19.0' : '18.20.8'
+    const manager = new RunManager(
+      fixture.workspace,
+      () => path.resolve(testDirectory, '..', 'src', 'main', 'runner.cjs'),
+      undefined,
+      () => ({ command: process.execPath, argsPrefix: [], source: 'test override' }),
+      () => ({ build } as unknown as Pick<typeof import('esbuild'), 'build'>),
+      async () => detectedVersion
+    )
+    expect(await manager.getRuntimeInfo()).toMatchObject({ version: detectedVersion })
+    const sent: Sent[] = []
+    const result = await manager.start(createWebContents(sent), {
+      code: '1', language: 'javascript', sourceFilePath: null
+    })
+    expect(result.ok).toBe(true)
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ target: [`node${detectedVersion}`] }))
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+  })
+
   it('为显式打印和纯表达式输出传递对应的源代码行号', async () => {
     const fixture = await createFixture()
     const sent: Sent[] = []

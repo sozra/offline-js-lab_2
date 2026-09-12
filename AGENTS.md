@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.3.5 技术栈
+## 2. v0.3.6 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -199,6 +199,8 @@ clearOutputOnRun
 - 在本表和 README 中登记。
 
 工作区路径不在 localStorage，而在 Electron `userData/settings.json`，由 `WorkspaceService` 管理。
+
+脚本编译目标必须取实际系统 Node 的版本探测结果（按命令与参数缓存），不得取 Electron Main 的 `process.versions.node`；版本探测失败必须诊断。`OFFLINE_JS_LAB_NODE` 显式配置优先。环境版本探测可以限时，用户脚本本身无运行超时。
 
 ## 10. 工作区与 npm
 

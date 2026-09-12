@@ -1,4 +1,4 @@
-# Offline JS Lab v0.3.5
+# Offline JS Lab v0.3.6
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
 
@@ -13,6 +13,8 @@ v0.3.3 修复 Windows 环境中 Monaco 可能只剩语法高亮、却缺少悬�
 v0.3.2 修复 Monaco 0.56 自定义入口使用错误导致的 Renderer 挂载前黑屏，修正两个只读 `computed` 的 TypeScript 类型，并避开 `vue-tsc` 3.1.6 的模板 codegen 崩溃。启动阶段现在始终显示加载占位；若 Vue、Monaco 或 Preload 初始化失败，会直接显示错误诊断而不是纯黑窗口。
 
 v0.3.1 修复 Electron 42+ 延迟下载二进制与 electron-vite 5 启动方式不兼容而导致的 `Error: Electron uninstall`。
+
+v0.3.6 修正脚本编译目标：探测实际执行的系统 Node.js 版本，esbuild 不再使用 Electron 内嵌 Node 版本作为用户脚本 target。`OFFLINE_JS_LAB_NODE` 显式配置优先；无效配置显示诊断，不静默切换运行环境。
 
 ## 主要能力
 
@@ -296,7 +298,7 @@ offlineJsLab.alignOutputToSource
 
 ## 没有运行超时
 
-v0.3.5 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
+v0.3.6 不包含 10/30/60 秒超时或隐藏计时器。普通脚本在 Node 子进程关闭时立即显示完成；包含 `setInterval()`、监听器或服务的脚本会持续运行，直到点击 `ABORT` 或使用 `Cmd/Ctrl + .`。
 
 仍保留单次 8 MB 输出上限，避免无限打印拖垮界面。这是缓冲保护，不是超时。
 

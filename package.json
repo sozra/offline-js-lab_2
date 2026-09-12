@@ -1,6 +1,6 @@
 {
   "name": "offline-js-lab",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "A local JavaScript and TypeScript scratchpad with a Vue-powered cyberdeck interface.",
   "main": "./out/main/index.js",
   "private": true,

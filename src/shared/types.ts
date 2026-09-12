@@ -9,6 +9,7 @@ export type NpmAction = 'install' | 'sync' | 'uninstall'
 export interface RuntimeInfo {
   command: string
   source: string
+  version?: string
 }
 
 export interface RuntimeDescriptor extends RuntimeInfo {

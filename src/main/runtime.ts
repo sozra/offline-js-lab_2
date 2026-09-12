@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { execFile } from 'node:child_process'
 import type { RuntimeDescriptor } from '@shared/types'
 
 function existingPath(value: string | undefined): string | null {
@@ -11,14 +12,14 @@ export function resolveNodeRuntime(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform
 ): RuntimeDescriptor {
+  const explicitNode = env.OFFLINE_JS_LAB_NODE?.trim()
+  if (explicitNode) {
+    return { command: explicitNode, argsPrefix: [], source: 'OFFLINE_JS_LAB_NODE' }
+  }
+
   const npmNode = existingPath(env.npm_node_execpath)
   if (npmNode) {
     return { command: npmNode, argsPrefix: [], source: 'npm_node_execpath' }
-  }
-
-  const explicitNode = existingPath(env.OFFLINE_JS_LAB_NODE)
-  if (explicitNode) {
-    return { command: explicitNode, argsPrefix: [], source: 'OFFLINE_JS_LAB_NODE' }
   }
 
   return {
@@ -26,6 +27,41 @@ export function resolveNodeRuntime(
     argsPrefix: [],
     source: 'PATH'
   }
+}
+
+const nodeVersionProbes = new Map<string, Promise<string>>()
+
+/** Probe the executable that runs scripts, never Electron's embedded Node. */
+export function probeNodeVersion(runtime: RuntimeDescriptor): Promise<string> {
+  const key = JSON.stringify([runtime.command, runtime.argsPrefix])
+  const cached = nodeVersionProbes.get(key)
+  if (cached) return cached
+
+  const probe = new Promise<string>((resolve, reject) => {
+    execFile(runtime.command, [...runtime.argsPrefix, '--version'], {
+      env: createChildEnvironment(),
+      encoding: 'utf8',
+      windowsHide: true,
+      // This only bounds the environment probe; scripts have no execution timeout.
+      timeout: 5000,
+      maxBuffer: 4096
+    }, (error, stdout) => {
+      if (error) {
+        reject(new Error(`无法检测 Node.js 版本（${describeRuntime(runtime)}）：${error.message}`))
+        return
+      }
+      const version = /^v?(\d+\.\d+\.\d+)(?:[-+][\w.-]+)?\s*$/.exec(stdout.trim())?.[1]
+      if (!version) {
+        reject(new Error(`Node.js 版本响应无效（${describeRuntime(runtime)}）。`))
+        return
+      }
+      resolve(version)
+    })
+  })
+  nodeVersionProbes.set(key, probe)
+  // A corrected installation may be retried without restarting the application.
+  void probe.catch(() => nodeVersionProbes.delete(key))
+  return probe
 }
 
 export function resolveNpmRuntime(

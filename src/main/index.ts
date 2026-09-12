@@ -166,7 +166,7 @@ async function getBootstrapState(): Promise<{
     platform: process.platform,
     isPackaged: app.isPackaged,
     packages: await getPackageState(),
-    nodeRuntime: runner().getRuntimeInfo()
+    nodeRuntime: await runner().getRuntimeInfo()
   }
 }
 

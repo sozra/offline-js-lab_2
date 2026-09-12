@@ -12,12 +12,14 @@ import type {
   RunOutputPayload,
   RunStartPayload,
   RunStartResult,
-  RuntimeDescriptor
+  RuntimeDescriptor,
+  RuntimeInfo
 } from '@shared/types'
 import type { WorkspaceService } from './workspace'
 import {
   createChildEnvironment,
   describeRuntime,
+  probeNodeVersion,
   resolveNodeRuntime
 } from './runtime'
 import { instrumentSource } from './source-instrumenter'
@@ -90,12 +92,14 @@ export class RunManager {
     private readonly getRunnerPath: () => string,
     private readonly spawnProcess: SpawnProcess = spawn,
     private readonly resolveRuntime: () => RuntimeDescriptor = resolveNodeRuntime,
-    private readonly getCompiler: () => Compiler = () => esbuild
+    private readonly getCompiler: () => Compiler = () => esbuild,
+    private readonly getNodeVersion: (runtime: RuntimeDescriptor) => Promise<string> = probeNodeVersion
   ) {}
 
-  getRuntimeInfo(): { command: string; source: string } {
+  async getRuntimeInfo(): Promise<RuntimeInfo> {
     const runtime = this.resolveRuntime()
-    return { command: describeRuntime(runtime), source: runtime.source }
+    const version = await this.getNodeVersion(runtime).catch(() => undefined)
+    return { command: describeRuntime(runtime), source: runtime.source, version }
   }
 
   async start(webContents: WebContentsTarget, payload: RunStartPayload): Promise<RunStartResult> {
@@ -121,9 +125,10 @@ export class RunManager {
 
     await fs.mkdir(this.workspace.getRunsPath(), { recursive: true })
 
+    const runtime = this.resolveRuntime()
     try {
       const compiler = this.getCompiler()
-      const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] ?? '22', 10)
+      const nodeVersion = await this.getNodeVersion(runtime)
       await compiler.build({
         stdin: {
           contents: instrumentSource(code, language).code,
@@ -142,14 +147,13 @@ export class RunManager {
         outfile: outputPath,
         platform: 'node',
         sourcemap: 'inline',
-        target: [`node${Number.isFinite(nodeMajor) ? nodeMajor : 22}`]
+        target: [`node${nodeVersion}`]
       })
     } catch (error) {
       await removeQuietly(outputPath)
       return { ok: false, error: formatBuildError(error) }
     }
 
-    const runtime = this.resolveRuntime()
     const args = [...runtime.argsPrefix, this.getRunnerPath(), outputPath]
     let child: ChildProcess
 
