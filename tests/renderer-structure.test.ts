@@ -26,7 +26,7 @@ const packageJson = JSON.parse(read('package.json')) as {
 
 describe('Vue renderer architecture', () => {
   it('使用 Vue 3 + electron-vite + TypeScript + Monaco', () => {
-    expect(packageJson.version).toBe('0.4.0')
+    expect(packageJson.version).toBe('0.4.1')
     expect(packageJson.dependencies.vue).toBeTruthy()
     expect(packageJson.dependencies['monaco-editor']).toBe('0.56.0')
     expect(packageJson.devDependencies['electron-vite']).toBeTruthy()

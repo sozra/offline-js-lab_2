@@ -16,7 +16,7 @@ export function resultText(chunks: OutputChunk[]): string {
 
 export interface DiffRow { left: string | null; right: string | null; kind: 'same' | 'added' | 'removed' }
 
-export function compareResults(left: string, right: string): { rows: DiffRow[]; truncated: boolean } {
+export function compareResults(left: string, right: string): { rows: DiffRow[]; truncated: boolean; leftText: string; rightText: string } {
   const limited = (text: string) => text.slice(0, 100_000).replace(/\r\n?/g, '\n').split('\n')
   const leftLines = limited(left)
   const rightLines = limited(right)
@@ -37,7 +37,8 @@ export function compareResults(left: string, right: string): { rows: DiffRow[]; 
     else if (j < b.length && (i === a.length || matrix[i]![j + 1]! >= matrix[i + 1]![j]!)) rows.push({ left: null, right: b[j++]!, kind: 'added' })
     else rows.push({ left: a[i++]!, right: null, kind: 'removed' })
   }
-  return { rows, truncated }
+  // The visual diff and the summary must compare exactly the same bounded text.
+  return { rows, truncated, leftText: a.join('\n'), rightText: b.join('\n') }
 }
 
 function freezeDeep<T>(value: T): T {

@@ -284,7 +284,17 @@ async function suite() {
     await runNode('SMOKE_INPUT 9')
     await clickText('^比较$', '.output-panel')
     await wait(() => exists('.compare-dialog'), 'comparison dialog')
-    assert.ok(await js(`() => document.querySelector('.compare-dialog').textContent.includes('SMOKE_INPUT 7') && document.querySelector('.compare-dialog').textContent.includes('SMOKE_INPUT 9')`))
+    await wait(() => js(`() => {
+      const text = document.querySelector('.compare-editor')?.textContent.replace(/\\u00a0/g, ' ') || '';
+      return text.includes('SMOKE_INPUT 7') && text.includes('SMOKE_INPUT 9') && document.querySelector('.compare-status')?.textContent.includes('1 处差异');
+    }`), 'side-by-side diff text and completed computation')
+    const highlights = await js(`() => ['char-delete', 'char-insert'].map(className => {
+      const mark = document.querySelector('.compare-editor .' + className);
+      return mark && { width: mark.getBoundingClientRect().width, background: getComputedStyle(mark).backgroundColor };
+    })`)
+    assert.ok(highlights.every(mark => mark && mark.width > 0 && mark.width < 20 && mark.background !== 'rgba(0, 0, 0, 0)'), 'Only the changed digit must receive a visible character highlight')
+    await click('.compare-navigation button[aria-label="下一处差异"]')
+    await click('.compare-navigation button[aria-label="上一处差异"]')
     await screenshot('03-comparison')
     await assertDialogCloseAligned('.compare-dialog')
     await click('.compare-labels > div:first-child button')
@@ -355,6 +365,14 @@ async function suite() {
       await wait(() => nativePreviewVisible(preview), 'native preview visible')
       assert.equal(await preview.executeJavaScript('typeof window.offlineJsLab'), 'undefined')
       await screenshot('06-react-interactive')
+      if (!fs.existsSync(path.join(dependencyPath, '@types/react/jsx-runtime.d.ts')) && !fs.existsSync(path.join(dependencyPath, 'react/jsx-runtime.d.ts'))) {
+        await clickText('^补全 React 类型$', '.editor-head')
+        await wait(() => !nativePreviewVisible(preview), 'React type helper hides preview under dependency dialog')
+        assert.equal(await js(`() => document.querySelector('.package-dialog textarea').value`), '@types/react @types/react-dom')
+        assert.ok(await js(`() => document.querySelector('.package-dialog .install-row input[type="checkbox"]').checked`))
+        await click('.package-dialog .dialog-close')
+        await wait(() => nativePreviewVisible(preview), 'preview resumes after React type helper')
+      }
     })
     await step('native preview hides for modal and Console, then resumes', async () => {
       const preview = currentPreview()

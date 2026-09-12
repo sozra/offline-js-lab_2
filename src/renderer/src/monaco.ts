@@ -1,5 +1,6 @@
-import type { ScriptLanguage } from '@shared/types'
+import type { ScriptLanguage, TypeDefinitionFile } from '@shared/types'
 import { isTypeScriptLanguage } from '@shared/languages'
+import { getEditorJsxMode } from './jsxTypeSupport'
 import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TypeScriptWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker'
@@ -59,7 +60,7 @@ const compilerOptions = {
   module: ModuleKind.ESNext,
   moduleResolution: ModuleResolutionKind.NodeJs,
   noEmit: true,
-  jsx: JsxEmit.ReactJSX,
+  jsx: JsxEmit.Preserve,
   resolveJsonModule: true,
   strict: false,
   target: ScriptTarget.ESNext
@@ -71,6 +72,15 @@ javascriptDefaults.setCompilerOptions({
   allowJs: true,
   checkJs: true
 })
+
+export function configureJsxTypeSupport(files: readonly TypeDefinitionFile[]): void {
+  const jsx = getEditorJsxMode(files, JsxEmit)
+  for (const defaults of [typescriptDefaults, javascriptDefaults]) {
+    if (defaults.getCompilerOptions().jsx !== jsx) {
+      defaults.setCompilerOptions({ ...defaults.getCompilerOptions(), jsx })
+    }
+  }
+}
 
 const diagnosticsOptions = {
   noSemanticValidation: false,
@@ -140,6 +150,12 @@ monaco.editor.defineTheme('cyberdeck-2077', {
   ],
   colors: {
     'editor.background': '#070A0D',
+    'diffEditor.removedLineBackground': '#FF4D6F18',
+    'diffEditor.insertedLineBackground': '#70E8A018',
+    'diffEditor.removedTextBackground': '#FF4D6F55',
+    'diffEditor.insertedTextBackground': '#70E8A04D',
+    'diffEditorGutter.removedLineBackground': '#FF4D6F38',
+    'diffEditorGutter.insertedLineBackground': '#70E8A038',
     'editor.foreground': '#DCECEF',
     'editorCursor.foreground': '#FCED0A',
     'editor.selectionBackground': '#FF003C38',

@@ -21,6 +21,7 @@ import { useOutputBuffer } from './composables/useOutputBuffer'
 import { useResizableSplit } from './composables/useResizableSplit'
 import { DEFAULT_JAVASCRIPT, DEFAULT_TYPESCRIPT } from './defaults'
 import type { LanguageServiceProbeResult } from './monaco'
+import { hasReactJsxRuntimeTypes } from './jsxTypeSupport'
 
 const api = window.offlineJsLab
 const AUTO_RUN_DELAY_MS = 500
@@ -89,6 +90,7 @@ const previewStates = new Map<string, PreviewState>()
 const resultTab = ref<'preview' | 'console'>(isBrowserLanguage(language.value) ? 'preview' : 'console')
 const previewConsole = ref(false)
 const browserMode = computed(() => isBrowserLanguage(language.value))
+const needsReactTypes = computed(() => browserMode.value && !hasReactJsxRuntimeTypes(typeDefinitions.value))
 const history = useRunHistory()
 const { runs, selectedId, pinned } = history
 const selectedSnapshot = computed(() => runs.value.find(run => run.id === (selectedId.value || currentRunId.value)) ?? runs.value[0] ?? null)
@@ -416,6 +418,7 @@ async function chooseWorkspace(): Promise<void> {
 }
 async function openWorkspace(): Promise<void> { try { const error = await api.openWorkspace(); if (error) throw new Error(error) } catch (error) { showToast(`打开工作区失败：${formatError(error)}`, 'error') } }
 function prepareReact(): void { if (modalVisible.value || running.value || npmBusy.value) return; packageInput.value = 'react react-dom @types/react @types/react-dom'; devDependency.value = false; packageDialogVisible.value = true }
+function prepareReactTypes(): void { if (modalVisible.value || running.value || npmBusy.value) return; packageInput.value = '@types/react @types/react-dom'; devDependency.value = true; packageDialogVisible.value = true }
 async function performNpmOperation(action: NpmAction, payload: { specs?: string; dev?: boolean; names?: string[] }, label: string): Promise<void> {
   if (npmBusy.value || running.value || confirmState.value.visible) return
   npmBusy.value = true; npmStatus.value = `${label} · 进行中`; pendingAutoRun.value = false
@@ -592,6 +595,7 @@ onBeforeUnmount(() => {
               <small>{{ filePath || '本地草稿 · 尚未保存到文件' }}</small>
             </div>
           </div>
+          <button v-if="needsReactTypes" class="micro-button" type="button" :disabled="modalVisible || running || npmBusy" title="尚未索引 React JSX 类型；组件仍可运行。打开依赖面板安装 @types/react 和 @types/react-dom，以启用完整的 React 补全与类型检查。" @click="prepareReactTypes">补全 React 类型</button>
           <div class="editor-telemetry">
             <span>{{ language.toUpperCase() }} CORE</span>
             <i aria-hidden="true" />

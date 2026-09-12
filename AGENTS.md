@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.4.0 技术栈
+## 2. v0.4.1 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -88,6 +88,8 @@ Vue 应用、Monaco、composables 与 CSS。Renderer 不直接使用 `fs`、`chi
 - `useResizableSplit.ts`：分栏比例与拖拽。
 - `useOutputBuffer.ts`：ANSI 清理、分块合并与 revision。
 - `monaco.ts`：Monaco 0.56 完整入口、单实例 TS/JS API、Worker、自检、mode configuration 与主题。
+- `jsxTypeSupport.ts`：根据工作区 JSX runtime 声明选择 Monaco noEmit 检查模式；不修改预览构建模式。
+- `ResultDiffEditor.vue`：结果只读 Monaco 双栏差异、行内高亮与差异导航；销毁时释放两个模型、编辑器和订阅。
 - `styles.css`：全局 Cyberdeck 设计系统、响应式和动画。
 
 ## 6. 启动与执行链路
@@ -425,7 +427,7 @@ AI agent 完成修改时：
 
 ## 18. v0.4.0 Renderer 工作流
 
-- `ScriptLanguage` 为 javascript/typescript/jsx/tsx；前两者运行于系统 Node，后两者运行于独立浏览器预览。Monaco 用 JS/TS language ID + 正确 .jsx/.tsx 模型 URI，切换时保留代码并探测 Worker；两个 defaults 都配置 React JSX，注入 lab 全局声明。
+- `ScriptLanguage` 为 javascript/typescript/jsx/tsx；前两者运行于系统 Node，后两者运行于独立浏览器预览。Monaco 用 JS/TS language ID + 正确 .jsx/.tsx 模型 URI，切换时保留代码并探测 Worker；两个 defaults 注入 lab 全局声明。v0.4.1 在索引到 react/jsx-runtime.d.ts（含 @types/react）时配置 ReactJSX；缺少时使用 noEmit + Preserve，保留源码检查且不误报 TS2875，不全局忽略该诊断。刷新类型/切换工作区必须更新此模式；esbuild 实际预览始终 automatic JSX。缺类型时头部「补全 React 类型」只打开现有依赖面板预填 @types/react @types/react-dom，不自动安装，也不把在线 Worker 标为降级。
 - `useDocumentSession.ts` 单键原子恢复文件路径、dirty 和 lastSavedCode；保存文件前捕获提交源码，异步保存期间的新编辑不能被标为已保存。
 - `useLabLibrary.ts` 管理 60 个/2 M 字符的本地收藏与模板；输入与代码一并保存。加载收藏/历史走统一放弃修改确认。
 - 损坏、部分非法或未知版本的收藏记录只读保留，不得通过下一次保存静默覆盖；可读条目仍可载入恢复。
@@ -437,6 +439,7 @@ AI agent 完成修改时：
 - `sourceLocation.ts` 统一入口文件匹配，兼容文件 URL、相对路径和 Windows 路径；依赖文件错误保留在 UNMAPPED，不使用其行号对齐当前编辑器。
 - 对象树按需挂载；复制快照必须保留稀疏数组索引、自定义属性和特殊值标记。
 - `RunCompareDialog.vue` 仅比较stdout/stderr/expression，最多每侧500行/100 K字符；截断不能推断全量一致，恢复必须复制快照并确认当前修改。
+- v0.4.1 使用同一 Monaco 实例的只读 diff editor 展示结果，两个 plaintext 模型与增删统计必须使用同一份归一化、截断后的文本。保持左右对齐、字符高亮、行号和差异导航；不忽略行首/行尾空格，不提供修改/回退输出操作。红色表示基线删除，绿色表示本次新增；关闭弹窗销毁模型和编辑器，不影响主代码模型。仅截断部分一致时必须明确完整结果未知。
 - `PreviewPane.vue` 只报告 DOM bounds；App 负责IPC与状态。任何模态、切到控制台或启动覆盖层出现时，立即隐藏原生View，避免压在Vue弹窗之上。
 - Node运行、Node准备态、预览构建/活动页面、npm必须明确协调；Node runId与最近run snapshot id、preview id不得混用。普通Node自然退出立即结束运行状态，Browser ready可早于start返回。
 - Main `stopHostWork()` 在窗口关闭、非同文档的主frame导航、Renderer崩溃与退出时回收Node/npm/preview；不能仅停止预览，否则重新加载后Node旧runId丢失会留下无法控制的进程。

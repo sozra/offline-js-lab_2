@@ -151,6 +151,18 @@ describe('result comparison', () => {
     expect(compareResults('', '').rows).toEqual([])
   })
 
+  it('feeds the visual diff the exact bounded text without removing meaningful whitespace', () => {
+    const compared = compareResults(' total: 7 \r\n\r\n', ' total: 9\n\n')
+    expect(compared.leftText).toBe(' total: 7 \n\n')
+    expect(compared.rightText).toBe(' total: 9\n\n')
+    expect(compareResults('', '').leftText).toBe('')
+    const limited = compareResults('x'.repeat(100_001), Array.from({ length: 501 }, (_, i) => String(i)).join('\n'))
+    expect(limited.leftText).toHaveLength(100_000)
+    expect(limited.rightText.split('\n')).toHaveLength(500)
+    expect(limited.rightText.endsWith('\n499')).toBe(true)
+    expect(limited.truncated).toBe(true)
+  })
+
   it('normalizes Windows line endings, ignores system noise, and exposes comparison limits', () => {
     expect(compareResults('a\r\nb', 'a\nb').rows.every(row => row.kind === 'same')).toBe(true)
     const chunks: OutputChunk[] = [{ id: 1, stream: 'system', text: 'elapsed 20ms' }, { id: 2, stream: 'stdout', text: 'value\n' }, { id: 3, stream: 'package', text: 'npm chatter' }]

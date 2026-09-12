@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ScriptLanguage, TypeDefinitionFile } from '@shared/types'
 import { isTypeScriptLanguage, languageExtension } from '@shared/languages'
 import {
+  configureJsxTypeSupport,
   getTypeScriptApi,
   monaco,
   probeLanguageService,
@@ -58,6 +59,7 @@ function applyTypeDefinitions(files: TypeDefinitionFile[]): void {
     typeDisposables.push(typescript.typescriptDefaults.addExtraLib(file.content, file.uri))
     typeDisposables.push(typescript.javascriptDefaults.addExtraLib(file.content, file.uri))
   }
+  configureJsxTypeSupport(files)
 }
 
 function runEditorAction(actionId: string): void {

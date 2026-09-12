@@ -1,6 +1,8 @@
-# Offline JS Lab v0.4.0
+# Offline JS Lab v0.4.1
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad，也支持 React JSX / TSX 交互组件预览。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
+
+v0.4.1 将「比较两次运行」升级为 Monaco 只读双栏差异视图：红/绿显示删除和新增，行内变化字符进一步高亮，可跳转上一处/下一处差异。修复工作区仅安装 React 运行时、缺少类型声明时 JSX 编辑器出现 TS2875 的问题，并提供「补全 React 类型」入口。
 
 v0.3.x 将此前的原生 HTML/CSS/JavaScript Renderer 重构为 Vue 技术栈，并加入一套受《赛博朋克 2077》界面语言启发的原创 Cyberdeck UI。项目没有使用游戏字体、Logo、截图、音效或其他专有素材。
 
@@ -30,6 +32,8 @@ v0.3.7 准备本地 React JSX/TSX 预览后端与输入/输出协议：预览使
 npm install react react-dom
 npm install -D @types/react @types/react-dom
 ```
+
+如果 JSX 可以运行，但编辑器提示 `react/jsx-runtime` 找不到（TS2875），通常是工作区缺少 `@types/react`：运行时包与编辑器类型声明是两部分。v0.4.1 在没有索引到 JSX runtime 类型时，让只做检查、不生成代码的 Monaco 使用 JSX Preserve；仍检查语法、用户组件参数和可用的其他类型。安装类型并刷新索引后自动恢复 ReactJSX 检查与完整 React 补全；预览始终由 esbuild 使用 automatic JSX 构建。编辑器头部的「补全 React 类型」会打开依赖面板并预填两个类型包，由用户点击安装。参见 [TypeScript JSX 模式](https://www.typescriptlang.org/docs/handbook/jsx.html) 和 [React TypeScript 类型安装](https://react.dev/learn/typescript)。
 
 「片段与模板」提供可直接载入的 JSX 计数器与 TSX 数据组件。例如：
 
@@ -66,7 +70,7 @@ lab.inputText
 - 输出可按文本搜索、类型筛选、复制单条文本；对象支持展开检查和数组表格。
 - 「复制快照 JSON」导出输出时的有限快照，特殊值、访问器、循环引用和截断使用标记保留，不承诺恢复任意原始 JavaScript 对象。
 - 运行选择器可以查看当前会话最近 12 次运行；总序列化预算为 12 M 字符。每次保留代码、输入、语言与输出，超限会明确标记截断。
-- 「固定结果」将选中运行保存为比较基线；再执行或选中另一次运行后点击「比较」，查看 stdout/stderr/表达式文本的新增与删除，并可恢复任一侧代码和输入。
+- 「固定结果」将选中运行保存为比较基线；再执行或选中另一次运行后点击「比较」，在只读双栏中查看 stdout/stderr/表达式文本差异，并可恢复任一侧代码和输入。左侧红色表示删除，右侧绿色表示新增，行内变化字符有更明显的背景高亮；保留行号、同步滚动和上一处/下一处差异导航。空格变化也参与比较。
 - 固定基线最多 1 M 字符，在重启后保留；保存失败会提示，不会假装固定成功。普通运行历史只保留在当前会话。
 - 比较每侧最多 500 行、100,000 字符；已截断的历史/缓冲不能被当成完整一致的证据。
 - `LINE:SYNC` 只对齐当前或选中的一次运行；关闭后可看完整时间顺序。源码或输入变化时显示过期提示，暂停旧位置跳转与双向滚动，恢复对应快照后才能准确定位。
@@ -92,7 +96,7 @@ npm 安装期间可以继续编辑，暂缓运行。依赖弹窗显示阻塞原�
 
 脚本使用真实 Electron 窗口、Monaco 键盘输入、应用 IPC 和组件交互，只有原生打开/保存对话框的路径选择被替换为测试文件。它在系统临时目录创建独立配置和工作区，保留报告及截图，不使用日常工作区。覆盖脚本结束与停止、Live 连续编辑、输入、固定比较、收藏、草稿恢复、React 交互与预览显隐、编译失败保留画面和最小窗口布局。
 
-2026-09-12 在 macOS 验证：`npm run check` 通过，17 组共 120 项测试通过；生产构建与整 App 12 项 Electron 场景通过，Renderer 控制台错误为空，刷新后旧脚本进程确实退出且可再次运行。另在独立后端测试中验证了预览无限循环停止、8 MB 输出保护和多次运行复用一个 Session。Windows 路径有单元覆盖，尚未进行 Windows 实机验证；安装包签名及发布不在本次验证范围内。
+2026-09-12 在 macOS 验证 v0.4.1：`npm run check` 通过，18 组共 126 项测试通过；`npm run build` 与整 App 12 项 Electron 场景通过，Renderer 控制台错误为空，刷新后旧脚本进程确实退出且可再次运行。比较场景检查了只高亮变化数字的字符色块、差异导航和快照恢复；React 场景检查了缺类型时入口预填与原生预览显隐。JSX/TSX 的有/无类型诊断由真实 TypeScript language service 单元测试覆盖。此前独立后端测试还验证了预览无限循环停止、8 MB 输出保护和多次运行复用一个 Session。Windows 路径有单元覆盖，尚未进行 Windows 实机验证；安装包签名及发布不在本次验证范围内。
 
 ## 主要能力
 
