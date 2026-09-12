@@ -1,4 +1,4 @@
-export type ScriptLanguage = 'typescript' | 'javascript'
+export type ScriptLanguage = 'typescript' | 'javascript' | 'jsx' | 'tsx'
 export type RunMode = 'manual' | 'live'
 export type RunTrigger = 'manual' | 'auto'
 export type OutputStream = 'stdout' | 'stderr' | 'expression' | 'system' | 'package' | 'muted'
@@ -58,20 +58,42 @@ export interface SaveFileResult {
 }
 
 export interface RunStartPayload {
+  runId?: string
   code: string
   language: ScriptLanguage
   sourceFilePath: string | null
+  input?: ScriptInput
+}
+
+export interface ScriptInput {
+  format: 'json' | 'text'
+  text: string
+}
+
+export interface SourceLocation {
+  file?: string
+  line: number
+  column: number
+}
+
+export interface ValueSnapshot {
+  kind: string
+  preview: string
+  children?: Array<{ key: string; value: ValueSnapshot }>
+  truncated?: boolean
 }
 
 export type RunStartResult =
   | { ok: true; runId: string; runtime: string }
-  | { ok: false; error: string }
+  | { ok: false; error: string; location?: SourceLocation }
 
 export interface RunOutputPayload {
   runId: string
   stream: Exclude<OutputStream, 'package' | 'muted'>
   text: string
   sourceLine?: number
+  location?: SourceLocation
+  values?: ValueSnapshot[]
 }
 
 export interface RunExitPayload {
@@ -123,9 +145,17 @@ export interface OfflineJsLabBridge {
   chooseWorkspace: () => Promise<PackageState | null>
   openWorkspace: () => Promise<string | null>
   openFile: () => Promise<OpenFileResult | null>
+  getRecentFiles: () => Promise<string[]>
+  openRecentFile: (filePath: string) => Promise<OpenFileResult>
   saveFile: (payload: SaveFilePayload) => Promise<SaveFileResult | null>
   runCode: (payload: RunStartPayload) => Promise<RunStartResult>
   stopRun: (runId: string) => Promise<boolean>
+  forceStopRun: (runId: string) => Promise<boolean>
+  startPreview: (payload: RunStartPayload) => Promise<PreviewStartResult>
+  stopPreview: () => Promise<void>
+  setPreviewBounds: (bounds: PreviewBounds) => Promise<void>
+  onPreviewOutput: (callback: (payload: RunOutputPayload) => void) => () => void
+  onPreviewState: (callback: (payload: PreviewState) => void) => () => void
   onRunOutput: (callback: (payload: RunOutputPayload) => void) => () => void
   onRunExit: (callback: (payload: RunExitPayload) => void) => () => void
   listPackages: () => Promise<PackageState>
@@ -160,4 +190,47 @@ export interface OutputChunk {
   stream: OutputStream
   text: string
   sourceLine?: number
+  runId?: string
+  sourceRevision?: number
+  location?: SourceLocation
+  values?: ValueSnapshot[]
+}
+
+export interface PreviewBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+  visible: boolean
+}
+
+export type PreviewStartResult =
+  | { ok: true; runId: string }
+  | { ok: false; error: string; location?: SourceLocation }
+
+export interface PreviewState {
+  runId: string
+  status: 'ready' | 'failed' | 'stopped'
+  error?: string
+}
+
+export interface LabDocument {
+  code: string
+  language: ScriptLanguage
+  input: ScriptInput
+}
+
+export interface SavedSnippet extends LabDocument {
+  id: string
+  name: string
+  updatedAt: number
+}
+
+export interface RunSnapshot extends LabDocument {
+  id: string
+  revision: number
+  createdAt: number
+  filePath: string | null
+  chunks: OutputChunk[]
+  status: string
 }

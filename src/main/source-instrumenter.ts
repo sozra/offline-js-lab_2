@@ -1,16 +1,13 @@
 import ts from 'typescript'
 import type { ScriptLanguage } from '@shared/types'
+import { applyMappedEdits, type SourceEdit } from './instrumentation-map'
 
 const LINE_AWARE_CONSOLE_METHODS = new Set(['debug', 'error', 'info', 'log', 'warn'])
 
-interface TextEdit {
-  start: number
-  end: number
-  text: string
-}
-
 export interface InstrumentSourceResult {
   code: string
+  sourceMap: string
+  originalPosition: (line: number, column: number) => { line: number; column: number }
   consoleLines: number[]
   implicitLines: number[]
 }
@@ -163,21 +160,10 @@ function getImplicitOutputKind(expression: ts.Expression): ImplicitOutputKind | 
   return isImplicitOutputCandidate(expression) ? 'value' : null
 }
 
-function applyEdits(code: string, edits: TextEdit[]): string {
-  const ordered = [...edits].sort(
-    (left, right) => right.start - left.start || right.end - left.end
-  )
-  let instrumented = code
-  for (const edit of ordered) {
-    instrumented =
-      instrumented.slice(0, edit.start) + edit.text + instrumented.slice(edit.end)
-  }
-  return instrumented
-}
-
 export function instrumentSource(
   code: string,
-  language: ScriptLanguage
+  language: ScriptLanguage,
+  sourcePath = language === 'typescript' ? 'scratch.ts' : 'scratch.js'
 ): InstrumentSourceResult {
   const sourceFile = ts.createSourceFile(
     language === 'typescript' ? 'scratch.ts' : 'scratch.js',
@@ -186,7 +172,7 @@ export function instrumentSource(
     true,
     language === 'typescript' ? ts.ScriptKind.TS : ts.ScriptKind.JS
   )
-  const edits: TextEdit[] = []
+  const edits: SourceEdit[] = []
   const consoleLines = new Set<number>()
   const implicitLines = new Set<number>()
 
@@ -238,7 +224,7 @@ export function instrumentSource(
 
   visit(sourceFile)
   return {
-    code: applyEdits(code, edits),
+    ...applyMappedEdits(code, edits, sourcePath),
     consoleLines: [...consoleLines].sort((left, right) => left - right),
     implicitLines: [...implicitLines].sort((left, right) => left - right)
   }

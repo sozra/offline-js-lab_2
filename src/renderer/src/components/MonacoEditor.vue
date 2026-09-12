@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ScriptLanguage, TypeDefinitionFile } from '@shared/types'
+import { isTypeScriptLanguage, languageExtension } from '@shared/languages'
 import {
   getTypeScriptApi,
   monaco,
@@ -33,6 +34,7 @@ let applyingExternalValue = false
 let typeDisposables: monaco.IDisposable[] = []
 let actionDisposables: monaco.IDisposable[] = []
 let languageProbeGeneration = 0
+let diagnosticDecorations: monaco.editor.IEditorDecorationsCollection | undefined
 
 const requiredEditorActions = [
   'editor.action.commentLine',
@@ -49,6 +51,9 @@ function applyTypeDefinitions(files: TypeDefinitionFile[]): void {
   typeDisposables = []
 
   const typescript = getTypeScriptApi()
+  const labTypes = 'declare const lab: { readonly input: any; readonly inputText: string };'
+  typeDisposables.push(typescript.typescriptDefaults.addExtraLib(labTypes, 'file:///workspace/lab.d.ts'))
+  typeDisposables.push(typescript.javascriptDefaults.addExtraLib(labTypes, 'file:///workspace/lab.d.ts'))
   for (const file of files) {
     typeDisposables.push(typescript.typescriptDefaults.addExtraLib(file.content, file.uri))
     typeDisposables.push(typescript.javascriptDefaults.addExtraLib(file.content, file.uri))
@@ -143,7 +148,7 @@ async function verifyLanguageService(): Promise<void> {
     emit('language-service', {
       language,
       ok: true,
-      message: `${language === 'typescript' ? 'TS' : 'JS'} LANGUAGE SERVICE ONLINE`
+      message: `${languageExtension(language).toUpperCase()} LANGUAGE SERVICE ONLINE`
     })
   } catch (error) {
     if (generation !== languageProbeGeneration) return
@@ -157,10 +162,10 @@ async function verifyLanguageService(): Promise<void> {
 
 onMounted(() => {
   if (!container.value) return
-  const extension = props.language === 'typescript' ? 'ts' : 'js'
+  const extension = languageExtension(props.language)
   const model = monaco.editor.createModel(
     props.modelValue,
-    props.language,
+    isTypeScriptLanguage(props.language) ? 'typescript' : 'javascript',
     monaco.Uri.parse(`file:///workspace/scratch.${extension}`)
   )
 
@@ -208,6 +213,7 @@ onMounted(() => {
   editor.onDidChangeModelContent(() => {
     if (applyingExternalValue || !editor) return
     const value = editor.getValue()
+    diagnosticDecorations?.clear()
     emit('update:modelValue', value)
     emit('change', value)
   })
@@ -219,6 +225,7 @@ onMounted(() => {
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => emit('run'))
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => emit('open'))
+  diagnosticDecorations = editor.createDecorationsCollection()
   registerEditorActions()
 
   applyTypeDefinitions(props.typeDefinitions)
@@ -244,7 +251,13 @@ watch(
   (language) => {
     const model = editor?.getModel()
     if (!model) return
-    monaco.editor.setModelLanguage(model, language)
+    const nextModel = monaco.editor.createModel(
+      model.getValue(),
+      isTypeScriptLanguage(language) ? 'typescript' : 'javascript',
+      monaco.Uri.parse(`file:///workspace/scratch.${languageExtension(language)}`)
+    )
+    editor?.setModel(nextModel)
+    model.dispose()
     window.setTimeout(() => void verifyLanguageService(), 0)
   }
 )
@@ -277,6 +290,16 @@ onBeforeUnmount(() => {
 defineExpose({
   focus: () => editor?.focus(),
   layout: () => editor?.layout(),
+  revealLocation: (line: number, column = 1) => {
+    const model = editor?.getModel()
+    if (!model || !editor) return
+    const safeLine = Math.max(1, Math.min(model.getLineCount(), line))
+    const safeColumn = Math.max(1, Math.min(model.getLineMaxColumn(safeLine), column))
+    editor.setPosition({ lineNumber: safeLine, column: safeColumn })
+    editor.revealLineInCenter(safeLine)
+    diagnosticDecorations?.set([{ range: new monaco.Range(safeLine, 1, safeLine, 1), options: { isWholeLine: true, className: 'lab-source-highlight' } }])
+    editor.focus()
+  },
   setScrollTop: (scrollTop: number) => {
     editor?.setScrollTop(Math.max(0, scrollTop), monaco.editor.ScrollType.Immediate)
   }

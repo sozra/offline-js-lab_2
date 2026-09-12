@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { instrumentSource } from '../src/main/source-instrumenter'
 
 describe('source instrumenter', () => {
+  it('将插入后同一行的列号映射回原代码，源映射保留原始文本', () => {
+    const source = 'console.log("你好"); missingFunction()\nconsole.error("next")'
+    const result = instrumentSource(source, 'javascript', '/workspace/scratch.js')
+    const generatedColumn = result.code.split('\n')[0]!.indexOf('missingFunction') + 1
+    expect(result.originalPosition(1, generatedColumn)).toEqual({ line: 1, column: source.indexOf('missingFunction') + 1 })
+    expect(JSON.parse(result.sourceMap)).toMatchObject({
+      version: 3, sources: ['/workspace/scratch.js'], sourcesContent: [source]
+    })
+  })
+
   it('标注 console 输出并将纯表达式变成隐式输出', () => {
     const source = [
       'const value = 7',

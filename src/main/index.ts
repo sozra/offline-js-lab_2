@@ -8,6 +8,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  protocol,
   session,
   shell,
   type IpcMainInvokeEvent,
@@ -21,10 +22,12 @@ import {
 import { IPC } from '@shared/ipc'
 import type {
   AppCommand,
+  BootstrapState,
   InstallPackagesPayload,
   NpmAction,
   PackageOutputPayload,
   PackageState,
+  PreviewBounds,
   RunStartPayload,
   SaveFilePayload,
   ScriptLanguage,
@@ -32,15 +35,35 @@ import type {
 } from '@shared/types'
 import { NpmManager } from './npm-manager'
 import { RunManager } from './run-manager'
+import { PreviewManager } from './preview-manager'
+import { RecentFiles } from './recent-files'
+import { PREVIEW_SCHEME } from './preview-build'
 import { WorkspaceService } from './workspace'
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 app.setName('Offline JS Lab')
+protocol.registerSchemesAsPrivileged([{ scheme: PREVIEW_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
 let mainWindow: BrowserWindow | null = null
 let workspaceService: WorkspaceService | null = null
 let npmManager: NpmManager | null = null
 let runManager: RunManager | null = null
+let previewManager: PreviewManager | null = null
+let recentFiles: RecentFiles | null = null
+
+async function recordRecentFile(filePath: string): Promise<void> {
+  await recentFiles?.record(filePath).catch(error => console.warn('无法更新最近文件列表', error))
+}
+
+async function readScriptFile(filePath: string) {
+  const stat = await fs.stat(filePath)
+  if (!stat.isFile()) throw new Error('所选路径不是文件。')
+  if (stat.size > MAX_FILE_BYTES) throw new Error(`文件超过 ${MAX_FILE_BYTES / 1024 / 1024} MB 的限制。`)
+  const content = await fs.readFile(filePath, 'utf8')
+  await recordRecentFile(filePath)
+  return { filePath, content, language: guessLanguage(filePath) }
+}
+let npmOperationPending = false
 
 function workspace(): WorkspaceService {
   if (!workspaceService) throw new Error('工作区服务尚未初始化。')
@@ -55,6 +78,11 @@ function npmService(): NpmManager {
 function runner(): RunManager {
   if (!runManager) throw new Error('运行服务尚未初始化。')
   return runManager
+}
+
+function previewer(): PreviewManager {
+  if (!previewManager) throw new Error('预览服务尚未初始化。')
+  return previewManager
 }
 
 function resolveUnpackedPath(inputPath: string): string {
@@ -90,7 +118,9 @@ function getBuiltRendererUrl(): string {
 }
 
 function isTrustedSender(event: IpcMainInvokeEvent): boolean {
-  const senderUrl = event.senderFrame?.url || event.sender.getURL()
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return false
+  const senderUrl = event.senderFrame?.url
+  if (!senderUrl) return false
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
     try {
@@ -143,6 +173,8 @@ function sendAppCommand(command: AppCommand): void {
 }
 
 function guessLanguage(filePath: string): ScriptLanguage {
+  if (/\.tsx$/i.test(filePath)) return 'tsx'
+  if (/\.jsx$/i.test(filePath)) return 'jsx'
   return /\.(?:ts|mts|cts)$/i.test(filePath) ? 'typescript' : 'javascript'
 }
 
@@ -154,13 +186,7 @@ async function getPackageState(): Promise<PackageState> {
   }
 }
 
-async function getBootstrapState(): Promise<{
-  appVersion: string
-  platform: string
-  isPackaged: boolean
-  packages: PackageState
-  nodeRuntime: { command: string; source: string }
-}> {
+async function getBootstrapState(): Promise<BootstrapState> {
   return {
     appVersion: app.getVersion(),
     platform: process.platform,
@@ -175,11 +201,17 @@ async function runNpmOperation(
   action: NpmAction,
   payload: Partial<InstallPackagesPayload & UninstallPackagesPayload> = {}
 ): Promise<unknown> {
+  if (npmOperationPending || runner().hasActiveRuns() || previewer().hasActivePreview()) throw new Error('请先停止当前脚本或组件预览，再操作依赖。')
+  npmOperationPending = true
   const progress = (output: PackageOutputPayload): void => {
     send(event.sender, IPC.packagesOutput, output)
   }
-  const result = await npmService().run(action, payload, progress)
-  return { ...result, packages: await getPackageState() }
+  try {
+    const result = await npmService().run(action, payload, progress)
+    return { ...result, packages: await getPackageState() }
+  } finally {
+    npmOperationPending = false
+  }
 }
 
 function registerIpcHandlers(): void {
@@ -194,6 +226,7 @@ function registerIpcHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return null
 
     runner().stopAll()
+    previewer().stop()
     npmService().stopAll()
     const selectedPath = result.filePaths[0]
     if (!selectedPath) return null
@@ -208,11 +241,11 @@ function registerIpcHandlers(): void {
 
   registerTrustedHandler(IPC.fileOpen, async (event) => {
     const result = await showOpenDialog(event.sender, {
-      title: '打开 JS/TS 脚本',
+      title: '打开脚本或 JSX/TSX 组件',
       defaultPath: workspace().getPath(),
       properties: ['openFile'],
       filters: [
-        { name: 'JavaScript / TypeScript', extensions: ['js', 'mjs', 'cjs', 'ts', 'mts', 'cts'] },
+        { name: 'JavaScript / TypeScript / React', extensions: ['js', 'mjs', 'cjs', 'ts', 'mts', 'cts', 'jsx', 'tsx'] },
         { name: '所有文件', extensions: ['*'] }
       ]
     })
@@ -220,22 +253,19 @@ function registerIpcHandlers(): void {
 
     const filePath = result.filePaths[0]
     if (!filePath) return null
-    const stat = await fs.stat(filePath)
-    if (stat.size > MAX_FILE_BYTES) {
-      throw new Error(`文件超过 ${MAX_FILE_BYTES / 1024 / 1024} MB 的 MVP 限制。`)
-    }
+    return readScriptFile(filePath)
+  })
 
-    return {
-      filePath,
-      content: await fs.readFile(filePath, 'utf8'),
-      language: guessLanguage(filePath)
-    }
+  registerTrustedHandler(IPC.recentFiles, () => recentFiles?.list() ?? [])
+  registerTrustedHandler(IPC.recentFileOpen, async (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !(await recentFiles?.includes(filePath))) throw new Error('该文件不在最近文件列表中，请使用“打开”选择文件。')
+    return readScriptFile(filePath)
   })
 
   registerTrustedHandler(IPC.fileSave, async (event, rawPayload) => {
     const payload = (rawPayload ?? {}) as Partial<SaveFilePayload>
     const content = typeof payload.content === 'string' ? payload.content : ''
-    const language: ScriptLanguage = payload.language === 'javascript' ? 'javascript' : 'typescript'
+    const language: ScriptLanguage = payload.language === 'javascript' || payload.language === 'jsx' || payload.language === 'tsx' ? payload.language : 'typescript'
     const forceSaveAs = Boolean(payload.saveAs)
     let filePath = typeof payload.filePath === 'string' && payload.filePath
       ? path.resolve(payload.filePath)
@@ -246,14 +276,15 @@ function registerIpcHandlers(): void {
     }
 
     if (!filePath || forceSaveAs) {
-      const defaultName = language === 'typescript' ? 'scratch.ts' : 'scratch.js'
+      const extension = language === 'typescript' ? 'ts' : language === 'javascript' ? 'js' : language
+      const defaultName = `scratch.${extension}`
       const result = await showSaveDialog(event.sender, {
         title: '保存脚本',
         defaultPath: filePath || path.join(workspace().getPath(), defaultName),
         filters: [
           {
-            name: language === 'typescript' ? 'TypeScript' : 'JavaScript',
-            extensions: language === 'typescript' ? ['ts'] : ['js']
+            name: language === 'typescript' || language === 'tsx' ? 'TypeScript' : 'JavaScript',
+            extensions: [extension]
           },
           { name: '所有文件', extensions: ['*'] }
         ]
@@ -264,15 +295,25 @@ function registerIpcHandlers(): void {
 
     await fs.mkdir(path.dirname(filePath), { recursive: true })
     await fs.writeFile(filePath, content, 'utf8')
+    await recordRecentFile(filePath)
     return { filePath, language: guessLanguage(filePath) }
   })
 
-  registerTrustedHandler(IPC.runStart, (event, payload) =>
-    runner().start(event.sender, payload as RunStartPayload)
-  )
+  registerTrustedHandler(IPC.runStart, (event, payload) => {
+    if (npmOperationPending || previewer().hasActivePreview()) return { ok: false, error: '请先停止 npm 操作或组件预览。' }
+    return runner().start(event.sender, payload as RunStartPayload)
+  })
   registerTrustedHandler(IPC.runStop, (_event, runId) =>
     runner().stop(typeof runId === 'string' ? runId : '')
   )
+  registerTrustedHandler(IPC.runForceStop, (_event, runId) => runner().forceStop(typeof runId === 'string' ? runId : ''))
+  registerTrustedHandler(IPC.previewStart, (event, payload) => {
+    if (npmOperationPending || runner().hasActiveRuns()) return { ok: false, error: '请先停止 npm 操作或 Node 脚本。' }
+    return previewer().start(event.sender, payload as RunStartPayload)
+  })
+  registerTrustedHandler(IPC.previewStop, () => previewer().stop())
+  registerTrustedHandler(IPC.previewBounds, (_event, bounds) => previewer().setBounds(bounds as PreviewBounds))
+  ipcMain.on(IPC.previewMessage, (event, message: unknown) => previewer().handleMessage(event, message))
 
   registerTrustedHandler(IPC.packagesList, () => getPackageState())
   registerTrustedHandler(IPC.packagesTypes, () => workspace().collectTypeDefinitions())
@@ -402,7 +443,12 @@ function createWindow(): void {
   window.on('closed', () => {
     runManager?.stopAll()
     npmManager?.stopAll()
+    previewManager?.stop()
     if (mainWindow === window) mainWindow = null
+  })
+  window.on('resize', () => previewManager?.applyBounds())
+  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) previewManager?.stop()
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
@@ -416,11 +462,13 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
+  recentFiles = new RecentFiles(app.getPath('userData'))
   configureEsbuildBinary()
   workspaceService = new WorkspaceService(app)
   await workspaceService.init()
   npmManager = new NpmManager(workspaceService)
   runManager = new RunManager(workspaceService, getRunnerPath)
+  previewManager = new PreviewManager(() => mainWindow, () => workspace().getPath(), () => path.join(__dirname, '../preload/preview.js'))
 
   registerIpcHandlers()
   createApplicationMenu()
@@ -437,6 +485,7 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   runManager?.stopAll()
   npmManager?.stopAll()
+  previewManager?.stop()
 })
 
 app.on('window-all-closed', () => {

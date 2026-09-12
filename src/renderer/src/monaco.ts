@@ -1,4 +1,5 @@
 import type { ScriptLanguage } from '@shared/types'
+import { isTypeScriptLanguage } from '@shared/languages'
 import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TypeScriptWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker'
@@ -24,6 +25,7 @@ const {
   ModuleKind,
   ModuleResolutionKind,
   ScriptTarget,
+  JsxEmit,
   getJavaScriptWorker,
   getTypeScriptWorker,
   javascriptDefaults,
@@ -57,6 +59,7 @@ const compilerOptions = {
   module: ModuleKind.ESNext,
   moduleResolution: ModuleResolutionKind.NodeJs,
   noEmit: true,
+  jsx: JsxEmit.ReactJSX,
   resolveJsonModule: true,
   strict: false,
   target: ScriptTarget.ESNext
@@ -116,7 +119,7 @@ export async function probeLanguageService(
   language: ScriptLanguage,
   uri: monaco.Uri
 ): Promise<void> {
-  const getWorker = language === 'typescript'
+  const getWorker = isTypeScriptLanguage(language)
     ? await getTypeScriptWorker()
     : await getJavaScriptWorker()
   const worker = await getWorker(uri)

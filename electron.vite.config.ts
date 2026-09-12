@@ -29,7 +29,16 @@ export default defineConfig({
       }
     },
     build: {
-      target: electronNodeTarget
+      target: electronNodeTarget,
+      rollupOptions: {
+        input: {
+          index: resolve('src/preload/index.ts'),
+          preview: resolve('src/preload/preview.ts')
+        },
+        // Sandboxed preloads cannot require a generated shared JS chunk.
+        // Separate entry builds inline their small shared IPC constant.
+        output: { entryFileNames: '[name].js' }
+      }
     }
   },
   renderer: {

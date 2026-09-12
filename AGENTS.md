@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.3.6 技术栈
+## 2. v0.3.7 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -398,3 +398,20 @@ AI agent 完成修改时：
 - 不声称未执行的 Electron 实机测试已经通过；
 - 更新版本号、README、AGENTS；
 - 不提交 `node_modules`、`out`、`release` 或工作区内容。
+
+## 17. v0.3.7 执行协议扩展
+
+- `RunStartPayload.runId` 可由 Renderer 预分配，准备阶段即可停止；旧 output/exit 必须按 runId 过滤。
+- Node 输入经独立临时 JSON 文件给 runner 的 `lab.input` / `lab.inputText`，退出删除；不通过命令行插值执行输入。
+- TypeScript AST 改写提供原始映射，再与 esbuild map 串联；Node 开启 `--enable-source-maps`，编译错误 UTF-8 字节列转换为 Monaco UTF-16 列。
+- 输出可携带 `values` 快照与 `location`，快照有大小/深度限制；getter、自定义 inspect/toJSON 不作为输出求值。8 MB 上限包括结构化数据。
+- 普通停止与用户触发强制停止均管理进程树；不添加脚本超时。
+- `preview-build.ts` 只构建用户工作区本地 React/ReactDOM，不运行用户模块；`preview-manager.ts` 用独立 WebContentsView 和内存 session 管理其生命周期。
+- 专用 `src/preload/preview.ts` 只转发预览输出，不暴露应用 bridge。Main 验证精确 sender、主 frame 与当前 runId；应用 IPC 只接受主窗口主 frame。
+- `lab-preview:` 协议仅提供本次构建的内存资源映射。禁止远程请求、导航、新窗口、权限和 webview；Node/contextIsolation/sandbox 边界保持。
+- 编译失败保留旧预览；成功替换或停止时销毁旧 WebContents，清理其状态。预览区 bounds 由 Main/Renderer 同步，弹窗期间必须隐藏原生视图。
+
+- 预览复用一个专用内存 Session，每次采用唯一 origin；清理只能清旧 origin，不得每次新建 partition 累积 BrowserContext，或让旧清理注销新页面协议。
+- Preload 与 Main 按原始消息共同执行 8 MB 上限，达到限制明确报告并销毁预览，不得静默停止日志转发。
+- 浏览器普通 getter 不求值；浏览器无法提前识别 Proxy，属性描述符读取可能触发其 trap，只发生在隔离预览进程。不要宣传恶意代码安全沙箱。
+- `recent-files.ts` 在 userData/recent-files.json 原子保存最近 12 个用户明确打开/保存的路径；open-recent 仅接受该列表中的路径。

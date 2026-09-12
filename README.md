@@ -1,4 +1,4 @@
-# Offline JS Lab v0.3.6
+# Offline JS Lab v0.3.7
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
 
@@ -15,6 +15,8 @@ v0.3.2 修复 Monaco 0.56 自定义入口使用错误导致的 Renderer 挂载�
 v0.3.1 修复 Electron 42+ 延迟下载二进制与 electron-vite 5 启动方式不兼容而导致的 `Error: Electron uninstall`。
 
 v0.3.6 修正脚本编译目标：探测实际执行的系统 Node.js 版本，esbuild 不再使用 Electron 内嵌 Node 版本作为用户脚本 target。`OFFLINE_JS_LAB_NODE` 显式配置优先；无效配置显示诊断，不静默切换运行环境。
+
+v0.3.7 准备本地 React JSX/TSX 预览后端与输入/输出协议：预览使用独立 WebContentsView、内存资源和专用 Preload，禁止应用 bridge、远程网络与导航；编译失败保留上次页面。Node 增加原始源码行列映射、有界对象快照、`lab.input` / `lab.inputText` 输入和用户触发的进程树强制停止。最近文件由 Main 原子保存到 userData，仅记住用户打开或保存过的文件。主界面将在后续阶段接入这些能力。
 
 ## 主要能力
 

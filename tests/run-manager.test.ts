@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -76,6 +77,176 @@ function createWebContents(sent: Sent[]): {
 }
 
 describe('RunManager', () => {
+  it('解析输入JSON和文本、保留调用方runId，并在结束后删除所有临时文件', async () => {
+    const fixture = await createFixture()
+    const sent: Sent[] = []
+    const runId = crypto.randomUUID()
+    const result = await fixture.manager.start(createWebContents(sent), {
+      runId, code: 'console.log(lab.input.answer, lab.inputText)', language: 'typescript',
+      sourceFilePath: null, input: { format: 'json', text: '{"answer":42}' }
+    })
+    expect(result).toMatchObject({ ok: true, runId })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent).toEqual(expect.arrayContaining([expect.objectContaining({ payload: expect.objectContaining({ text: '42 {"answer":42}\n' }) })]))
+    expect(await fs.readdir(fixture.workspace.getRunsPath())).toEqual([])
+    expect(fixture.manager.hasActiveRuns()).toBe(false)
+    sent.length = 0
+    await fixture.manager.start(createWebContents(sent), {
+      code: 'lab.input', language: 'javascript', sourceFilePath: null,
+      input: { format: 'text', text: 'hello\nworld' }
+    })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent.some((item) => item.channel === 'run:output' && item.payload.values?.[0]?.preview === '"hello\\nworld"')).toBe(true)
+  })
+
+  it('输入错误和浏览器语言在启动前返回明确错误', async () => {
+    const { manager, workspace } = await createFixture()
+    const sent: Sent[] = []
+    const invalid = await manager.start(createWebContents(sent), {
+      code: 'console.log("must not run")', language: 'javascript', sourceFilePath: null,
+      input: { format: 'json', text: '{' }
+    })
+    expect(invalid).toMatchObject({ ok: false, error: expect.stringContaining('有效 JSON') })
+    expect(await manager.start(createWebContents(sent), { code: '<h1 />', language: 'jsx', sourceFilePath: null }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('浏览器预览') })
+    expect(sent).toHaveLength(0)
+    expect(await fs.readdir(workspace.getRunsPath())).toEqual([])
+    expect(manager.hasActiveRuns()).toBe(false)
+  })
+
+  it('编译错误和运行错误定位到AST插入之前的原始源码行列', async () => {
+    const fixture = await createFixture()
+    const sent: Sent[] = []
+    const invalidCode = 'console.log("before"); const value = ;'
+    const buildError = await fixture.manager.start(createWebContents(sent), {
+      code: invalidCode, language: 'typescript', sourceFilePath: null
+    })
+    expect(buildError, JSON.stringify(buildError)).toMatchObject({ ok: false, location: { line: 1, column: invalidCode.lastIndexOf(';') + 1 } })
+    expect(await fs.readdir(fixture.workspace.getRunsPath())).toEqual([])
+    const runtimeCode = 'console.log("你好"); missingFunction()'
+    await fixture.manager.start(createWebContents(sent), { code: runtimeCode, language: 'javascript', sourceFilePath: null })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ channel: 'run:output', payload: expect.objectContaining({
+        stream: 'stderr', text: expect.stringContaining('ReferenceError'),
+        location: { file: path.join(fixture.root, 'scratch.js'), line: 1, column: runtimeCode.indexOf('missingFunction') + 1 }
+      }) }),
+      expect.objectContaining({ channel: 'run:exit', payload: expect.objectContaining({ reason: 'failed', code: 1 }) })
+    ]))
+  })
+
+  it('有界结构化对象保留循环引用与访问器，且不调用getter、toJSON或自定义inspect', async () => {
+    const { manager } = await createFixture()
+    const sent: Sent[] = []
+    await manager.start(createWebContents(sent), {
+      language: 'typescript', sourceFilePath: null,
+      code: [
+        'import { inspect } from "node:util"',
+        'let sideEffects = 0',
+        'const value: any = { answer: 42, list: [1, 2], toJSON() { sideEffects++; return "unsafe" } }',
+        'Object.defineProperty(value, "danger", { enumerable: true, get() { sideEffects++; throw new Error("getter called") } })',
+        'value[inspect.custom] = () => { sideEffects++; return "unsafe" }',
+        'value.self = value',
+        'console.log("%j %s %o", value, value, value)',
+        'sideEffects'
+      ].join('\n')
+    })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    const outputs = sent.filter((item): item is Extract<Sent, { channel: 'run:output' }> => item.channel === 'run:output')
+    const printed = outputs.find((item) => item.payload.sourceLine === 7)?.payload
+    expect(printed?.values?.[1]?.children).toEqual(expect.arrayContaining([
+      { key: 'answer', value: { kind: 'number', preview: '42' } },
+      { key: 'danger', value: { kind: 'accessor', preview: '[Getter]' } },
+      { key: 'self', value: { kind: 'circular', preview: '[Circular / shared reference]' } }
+    ]))
+    expect(outputs.find((item) => item.payload.sourceLine === 8)?.payload.text).toBe('⇒ 0\n')
+    expect(sent.find((item) => item.channel === 'run:exit')?.payload).toMatchObject({ reason: 'completed' })
+  })
+
+  it('编译准备期间拒绝并行启动，可取消并紧接着执行最新代码', async () => {
+    const fixture = await createFixture()
+    let resolveVersion!: (value: string) => void
+    const version = new Promise<string>((resolve) => { resolveVersion = resolve })
+    const manager = new RunManager(fixture.workspace,
+      () => path.resolve(testDirectory, '..', 'src', 'main', 'runner.cjs'), undefined,
+      () => ({ command: process.execPath, argsPrefix: [], source: 'test' }), undefined, () => version)
+    const sent: Sent[] = []
+    const runId = crypto.randomUUID()
+    const pending = manager.start(createWebContents(sent), { runId, code: '"old"', language: 'javascript', sourceFilePath: null })
+    expect(manager.hasActiveRuns()).toBe(true)
+    expect(await manager.start(createWebContents(sent), { code: '"parallel"', language: 'javascript', sourceFilePath: null })).toMatchObject({ ok: false })
+    expect(manager.stop(runId)).toBe(true)
+    resolveVersion(process.versions.node)
+    expect(await pending).toMatchObject({ ok: false, error: '运行已取消。' })
+    expect(sent).toHaveLength(0)
+    expect(await manager.start(createWebContents(sent), { code: 'console.log("latest")', language: 'javascript', sourceFilePath: null })).toMatchObject({ ok: true })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent.some((item) => item.channel === 'run:output' && item.payload.text === 'latest\n')).toBe(true)
+  })
+
+  it('强制停止会结束忽略SIGTERM的脚本', async () => {
+    const { manager } = await createFixture('process.on("SIGTERM", () => {}); console.log("ready"); setInterval(() => {}, 1000)')
+    const sent: Sent[] = []
+    const result = await manager.start(createWebContents(sent), { code: '', language: 'javascript', sourceFilePath: null })
+    if (!result.ok) throw new Error(result.error)
+    await waitFor(() => sent.some((item) => item.channel === 'run:output' && item.payload.text.includes('ready')))
+    expect(manager.forceStop(result.runId)).toBe(true)
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent.find((item) => item.channel === 'run:exit')?.payload).toMatchObject({ reason: 'stopped' })
+    expect(manager.hasActiveRuns()).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32')('普通停止同时通知并结束POSIX子进程树', async () => {
+    const descendantCode = 'process.on("SIGTERM", () => { console.log("descendant stopped"); process.exit(0) }); console.log("descendant ready"); setInterval(() => {}, 1000)'
+    const { manager } = await createFixture([
+      'import { spawn } from "node:child_process";',
+      `spawn(process.execPath, ['-e', ${JSON.stringify(descendantCode)}], { stdio: 'inherit' });`,
+      'setInterval(() => {}, 1000);'
+    ].join('\n'))
+    const sent: Sent[] = []
+    const result = await manager.start(createWebContents(sent), { code: '', language: 'javascript', sourceFilePath: null })
+    if (!result.ok) throw new Error(result.error)
+    try {
+      await waitFor(() => sent.some((item) => item.channel === 'run:output' && item.payload.text.includes('descendant ready')))
+      expect(manager.stop(result.runId)).toBe(true)
+      await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+      expect(sent.some((item) => item.channel === 'run:output' && item.payload.text.includes('descendant stopped'))).toBe(true)
+    } finally { manager.stopAll() }
+  })
+
+  it('大型数组、深层对象、超长Symbol及Proxy快照有界且不执行陷阱', async () => {
+    const { manager } = await createFixture()
+    const sent: Sent[] = []
+    await manager.start(createWebContents(sent), {
+      language: 'javascript', sourceFilePath: null,
+      code: [
+        'const big = Array.from({ length: 1000 }, (_, index) => ({ index, value: "x".repeat(5000) }))',
+        'const proxy = new Proxy({}, { ownKeys() { throw new Error("trap called") } })',
+        'console.log(big, Symbol("s".repeat(100000)), proxy)'
+      ].join('\n')
+    })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    const rich = sent.find((item): item is Extract<Sent, { channel: 'run:output' }> => item.channel === 'run:output' && Boolean(item.payload.values))?.payload
+    expect(rich?.values?.[0]?.truncated).toBe(true)
+    expect(JSON.stringify(rich?.values).length).toBeLessThan(200000)
+    expect(sent.find((item) => item.channel === 'run:exit')?.payload).toMatchObject({ reason: 'completed' })
+    expect(sent.some((item) => item.channel === 'run:output' && item.payload.text.includes('内部输出协议错误'))).toBe(false)
+  })
+
+  it('结构化元数据与文本共用8MB上限', async () => {
+    const { manager } = await createFixture([
+      'import fs from "node:fs";',
+      'const record = Buffer.from(JSON.stringify({ stream: "stdout", text: "", values: [{ kind: "string", preview: "x".repeat(16000) }] }) + "\\n");',
+      'for (let i = 0; i < 700; i++) { let offset = 0; while (offset < record.length) offset += fs.writeSync(3, record, offset); }',
+      'setInterval(() => {}, 1000);'
+    ].join('\n'))
+    const sent: Sent[] = []
+    await manager.start(createWebContents(sent), { code: '', language: 'javascript', sourceFilePath: null })
+    await waitFor(() => sent.some((item) => item.channel === 'run:exit'))
+    expect(sent.find((item) => item.channel === 'run:exit')?.payload).toMatchObject({ reason: 'output-limit' })
+    expect(sent.some((item) => item.channel === 'run:output' && item.payload.text.includes('8 MB'))).toBe(true)
+  })
+
   it('esbuild target 使用探测的执行 Node 版本而不是宿主版本', async () => {
     const fixture = await createFixture()
     const build = vi.fn(async (options: import('esbuild').BuildOptions) => {
