@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import vue from '@vitejs/plugin-vue'
 
-// Electron 44 embeds Node.js 24.18 and Chromium 152. electron-vite 5.0.0's
+// Electron 44.2.0 embeds Node.js 24.20 and Chromium 152. Keep Node 24.18
+// as a conservative application build target. electron-vite 5.0.0's
 // built-in version table currently stops at Electron 41, so keep the targets
 // explicit instead of allowing an unknown major to fall back to stale values.
 const electronNodeTarget = 'node24.18'

@@ -419,6 +419,12 @@ function createApplicationMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+function stopHostWork(): void {
+  runManager?.stopAll()
+  npmManager?.stopAll()
+  previewManager?.stop()
+}
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1480,
@@ -441,15 +447,16 @@ function createWindow(): void {
   mainWindow = window
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
-    runManager?.stopAll()
-    npmManager?.stopAll()
-    previewManager?.stop()
+    stopHostWork()
     if (mainWindow === window) mainWindow = null
   })
   window.on('resize', () => previewManager?.applyBounds())
-  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
-    if (isMainFrame) previewManager?.stop()
+  window.webContents.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+    // A replacement renderer cannot recover the previous renderer's run IDs.
+    // Release its processes before the new document starts accepting commands.
+    if (isMainFrame && !inPlace) stopHostWork()
   })
+  window.webContents.on('render-process-gone', stopHostWork)
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
@@ -482,11 +489,7 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', () => {
-  runManager?.stopAll()
-  npmManager?.stopAll()
-  previewManager?.stop()
-})
+app.on('before-quit', stopHostWork)
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

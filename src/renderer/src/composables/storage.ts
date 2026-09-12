@@ -7,11 +7,14 @@ export function readStorage(key: string, fallback: string): string {
 }
 
 export function readBooleanStorage(key: string, fallback: boolean): boolean {
-  return readStorage(key, String(fallback)) !== 'false'
+  const value = readStorage(key, String(fallback))
+  return value === 'true' ? true : value === 'false' ? false : fallback
 }
 
 export function readNumberStorage(key: string, fallback: number): number {
-  const value = Number(readStorage(key, String(fallback)))
+  const raw = readStorage(key, String(fallback))
+  if (!raw.trim()) return fallback
+  const value = Number(raw)
   return Number.isFinite(value) ? value : fallback
 }
 

@@ -2867,3 +2867,70 @@ html:not(.is-running) .console-scan {
   letter-spacing: 0.08em;
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
+
+/* v0.4: readable experiment controls and independently sized input/results. */
+.library-dialog .dialog-head,
+.compare-dialog .dialog-head { grid-template-columns: minmax(0, 1fr) auto; }
+.app-shell--lab-v4 .toolbar-button b,
+.app-shell--lab-v4 .mode-switch button,
+.app-shell--lab-v4 .select-trigger,
+.app-shell--lab-v4 .execute-button__copy b,
+.app-shell--lab-v4 .abort-button,
+.app-shell--lab-v4 .matrix-button b { font-size: 11px; letter-spacing: .2px; }
+.app-shell--lab-v4 .toolbar-button { min-width: 62px; padding: 0 9px; }
+.app-shell--lab-v4 .toolbar-button--library { display: flex; align-items: center; white-space: nowrap; }
+.app-shell--lab-v4 .select-module { width: 132px; flex: 0 0 132px; }
+.app-shell--lab-v4 .mode-switch button { min-width: 45px; padding: 0 9px; }
+.app-shell--lab-v4 .execute-button { min-width: 96px; }
+.app-shell--lab-v4 .matrix-button { min-width: 65px; }
+.app-shell--lab-v4 .toolbar-button b,
+.app-shell--lab-v4 .matrix-button b { display: inline; }
+.app-shell--lab-v4 .abort-button { white-space: nowrap; }
+.app-shell--lab-v4 .editor-panel { display: flex; flex-direction: column; }
+.app-shell--lab-v4 .editor-head { min-height: 47px; flex: 0 0 auto; }
+.app-shell--lab-v4 .dirty-tag { justify-self: start; width: max-content; }
+.app-shell--lab-v4 .editor-shell { flex: 1; min-height: 120px; }
+.app-shell--lab-v4 .input-panel { flex: 0 0 auto; max-height: 44%; overflow: auto; }
+.app-shell--lab-v4 .input-panel--collapsed { overflow: hidden; }
+.editor-operation-note { flex: none; padding: 5px 12px; color: var(--cyber-yellow); background: #24210e; font-size: 11px; }
+.results-deck { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 0; }
+.results-deck > .output-panel { flex: 1; min-height: 0; }
+.results-tabs { display: flex; flex: none; align-items: center; gap: 4px; min-height: 39px; padding: 5px 8px; border: 1px solid #29414a; border-bottom: 0; background: #101a21; }
+.results-tabs > button { padding: 6px 12px; font-size: 12px; color: #acbdc8; cursor: pointer; background: transparent; border-bottom: 2px solid transparent; }
+.results-tabs > button[aria-selected="true"] { color: var(--cyber-cyan); border-color: var(--cyber-cyan); }
+.results-tabs > label { margin-left: auto; display: flex; align-items: center; gap: 4px; color: #abbec9; font-size: 11px; cursor: pointer; }
+.results-deck--split > .preview-pane { flex: 1 1 52%; min-height: 130px; }
+.results-deck--split > .output-panel { flex: 1 1 48%; min-height: 150px; border-top: 3px solid #334751; }
+.results-deck--split .output-head .pane-ident small { display: none; }
+.results-deck--split .output-browse { gap: 4px; }
+.file-more { position: relative; display: flex; align-content: center; margin: 0 7px; -webkit-app-region: no-drag; }
+.file-more > summary { display: flex; align-items: center; height: 100%; min-width: 40px; padding: 0 4px; font-size: 11px; cursor: pointer; color: #b4c5ce; list-style: none; }
+.file-more > summary::-webkit-details-marker { display: none; }
+.file-more > summary::after { content: ' ▾'; margin-left: 5px; }
+.file-more__menu { position: absolute; z-index: 40; right: 0; top: calc(100% - 2px); display: flex; flex-direction: column; width: 300px; max-height: 380px; overflow: auto; padding: 8px; border: 1px solid #526570; background: #111c24; box-shadow: 0 10px 25px #0009; }
+.file-more__menu > button { display: block; flex: none; padding: 10px; text-align: left; font-size: 12px; color: #d4e0e6; background: transparent; cursor: pointer; overflow-wrap: anywhere; }
+.file-more__menu > button:hover:not(:disabled) { background: #243b46; }
+.file-more__menu > button small { display: block; margin-top: 3px; font-size: 10px; color: #95a9b4; }
+.file-more__menu > strong, .file-more__menu > span { padding: 8px 10px; color: #91a9b7; font-size: 11px; }
+.app-shell--lab-v4 :is(.results-tabs button, .file-more summary, .file-more__menu button):focus-visible { outline: 2px solid var(--cyber-yellow); outline-offset: -2px; }
+@media (max-width: 1400px) {
+  .app-shell--lab-v4 { grid-template-rows: 108px minmax(0, 1fr) 31px; }
+  .app-shell--lab-v4 .command-bar { flex-wrap: wrap; align-content: start; }
+  .app-shell--lab-v4 .brand-lockup { min-width: 220px; height: 54px; padding-top: 5px; padding-bottom: 4px; }
+  .app-shell--lab-v4 .file-actions { flex: 1; justify-content: flex-end; height: 54px; margin-left: 0; padding-right: 10px; }
+  .app-shell--lab-v4 .command-controls { flex: 0 0 100%; height: 54px; justify-content: flex-end; gap: 8px; padding: 4px 12px 7px; border-top: 1px solid #223038; }
+  .app-shell--lab-v4 .select-module > span { display: none; }
+  .app-shell--lab-v4 .mode-switch { height: 34px; }
+  .app-shell--lab-v4 .file-more__menu { top: 100%; }
+}
+@media (max-width: 1050px) {
+  .app-shell--lab-v4 .brand-lockup { min-width: 170px; }
+  .app-shell--lab-v4 .brand-copy h1 { width: auto; font-size: 20px; }
+  .app-shell--lab-v4 .brand-kicker { font-size: 8px; }
+  .app-shell--lab-v4 .file-actions .toolbar-button { min-width: 60px; }
+  .app-shell--lab-v4 .toolbar-button__icon { display: none; }
+  .app-shell--lab-v4 .toolbar-button { display: flex; align-items: center; justify-content: center; }
+  .app-shell--lab-v4 .editor-telemetry { display: none; }
+  .results-tabs { flex-wrap: wrap; }
+  .results-tabs > label { font-size: 11px; }
+}

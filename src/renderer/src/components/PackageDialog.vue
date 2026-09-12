@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import type { PackageState } from '@shared/types'
+import { useDialogFocus } from '../composables/useDialogFocus'
 
 const props = defineProps<{
   visible: boolean
@@ -9,6 +10,8 @@ const props = defineProps<{
   npmStatus: string
   packageInput: string
   devDependency: boolean
+  blockedReason?: string
+  npmLog?: string
 }>()
 
 const emit = defineEmits<{
@@ -24,26 +27,26 @@ const emit = defineEmits<{
   'update:devDependency': [value: boolean]
 }>()
 
-function onKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && props.visible) emit('close')
-}
+const dialog = ref<HTMLElement>()
+const packageField = ref<HTMLTextAreaElement>()
+const mutationBlocked = computed(() => props.npmBusy || Boolean(props.blockedReason))
+const installBlocked = computed(() => mutationBlocked.value || !props.packageInput.trim())
+const { onDialogKeydown } = useDialogFocus(() => props.visible, dialog, () => emit('close'), () => props.npmBusy ? undefined : packageField.value)
 
 function onInputKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
     event.preventDefault()
-    emit('install')
+    if (!installBlocked.value) emit('install')
   }
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="hud-dialog">
       <div v-if="visible" class="dialog-backdrop" role="presentation" @mousedown.self="emit('close')">
-        <section class="cyber-dialog package-dialog" role="dialog" aria-modal="true" aria-labelledby="package-dialog-title">
+        <section ref="dialog" class="cyber-dialog package-dialog" role="dialog" aria-modal="true" aria-labelledby="package-dialog-title" tabindex="-1" @keydown="onDialogKeydown">
           <div class="dialog-notch" aria-hidden="true" />
           <header class="dialog-head">
             <div class="dialog-code">SYS.CONFIG / 03</div>
@@ -70,7 +73,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <code>{{ packageState?.workspacePath || 'INITIALIZING...' }}</code>
               </div>
               <div class="button-cluster">
-                <button class="cyber-button cyber-button--secondary" type="button" :disabled="npmBusy" @click="emit('chooseWorkspace')">
+                <button class="cyber-button cyber-button--secondary" type="button" :disabled="mutationBlocked" :title="blockedReason" @click="emit('chooseWorkspace')">
                   更换目录
                 </button>
                 <button class="cyber-button cyber-button--ghost" type="button" @click="emit('openWorkspace')">
@@ -96,11 +99,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <label class="field-stack">
                 <span>PACKAGE SPEC // 空格或换行分隔</span>
                 <textarea
+                  ref="packageField"
                   :value="packageInput"
                   rows="3"
                   spellcheck="false"
                   placeholder="lodash dayjs"
-                  :disabled="npmBusy"
                   @input="emit('update:packageInput', ($event.target as HTMLTextAreaElement).value)"
                   @keydown="onInputKeydown"
                 />
@@ -110,20 +113,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   <input
                     type="checkbox"
                     :checked="devDependency"
-                    :disabled="npmBusy"
+                    :disabled="mutationBlocked"
                     @change="emit('update:devDependency', ($event.target as HTMLInputElement).checked)"
                   />
                   <span aria-hidden="true" />
                   DEV DEPENDENCY
                 </label>
                 <div class="button-cluster button-cluster--right">
-                  <button class="cyber-button cyber-button--ghost" type="button" :disabled="npmBusy" @click="emit('sync')">
+                  <button class="cyber-button cyber-button--ghost" type="button" :disabled="mutationBlocked" :title="blockedReason" @click="emit('sync')">
                     同步
                   </button>
                   <button
                     v-if="!npmBusy"
                     class="cyber-button cyber-button--primary"
                     type="button"
+                    :disabled="installBlocked"
+                    :title="blockedReason || (!packageInput.trim() ? '先输入要安装的包名' : '')"
                     @click="emit('install')"
                   >
                     npm install
@@ -134,6 +139,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </div>
               </div>
               <div class="npm-status-line"><i aria-hidden="true" />{{ npmStatus }}</div>
+              <p v-if="blockedReason" class="npm-blocked-reason" role="status">{{ blockedReason }}</p>
+              <details v-if="npmLog" class="npm-inline-log">
+                <summary>查看 npm 输出</summary>
+                <pre>{{ npmLog }}</pre>
+              </details>
             </section>
 
             <section class="config-block config-block--packages">
@@ -142,7 +152,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   <span class="eyebrow">DIRECT DEPENDENCIES</span>
                   <h3>已声明包</h3>
                 </div>
-                <button class="micro-button" type="button" :disabled="npmBusy" @click="emit('refresh')">SCAN</button>
+                <button class="micro-button" type="button" :disabled="mutationBlocked" :title="blockedReason" @click="emit('refresh')">扫描</button>
               </div>
 
               <div v-if="!packageState?.installed.length" class="package-empty">
@@ -160,8 +170,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                       <template v-if="item.license"> · {{ item.license }}</template>
                     </span>
                   </div>
-                  <button class="micro-button micro-button--danger" type="button" :disabled="npmBusy" @click="emit('uninstall', item.name)">
-                    REMOVE
+                  <button class="micro-button micro-button--danger" type="button" :disabled="mutationBlocked" :title="blockedReason" @click="emit('uninstall', item.name)">
+                    移除
                   </button>
                 </article>
               </div>
@@ -177,3 +187,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.npm-blocked-reason{margin:10px 0 0;color:var(--cyber-yellow);font-size:12px;line-height:1.6}
+.npm-inline-log{margin-top:12px;border:1px solid #35414d;padding:9px 12px;color:#a7bac7;font-size:12px}
+.npm-inline-log summary{cursor:pointer;list-style:revert}
+.npm-inline-log pre{margin:10px 0 0;max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;line-height:1.6;color:#d4e2eb}
+.npm-inline-log summary:focus-visible{outline:2px solid var(--cyber-yellow);outline-offset:3px}
+</style>

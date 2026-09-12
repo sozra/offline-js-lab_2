@@ -1,6 +1,6 @@
 {
   "name": "offline-js-lab",
-  "version": "0.3.7",
+  "version": "0.4.0",
   "description": "A local JavaScript and TypeScript scratchpad with a Vue-powered cyberdeck interface.",
   "main": "./out/main/index.js",
   "private": true,
@@ -18,6 +18,8 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
+    "pretest:electron": "npm run electron:ensure",
+    "test:electron": "node scripts/run-electron-smoke.mjs",
     "check": "npm run check:source && npm run typecheck && npm test",
     "build": "npm run check:source && npm run typecheck && electron-vite build",
     "prepreview": "npm run electron:ensure",

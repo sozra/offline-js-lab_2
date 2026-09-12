@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 export interface CyberSelectOption {
   value: string
@@ -16,6 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'open-change': [value: boolean]
 }>()
 
 const root = ref<HTMLElement>()
@@ -42,6 +43,7 @@ function toggle(): void {
     0,
     props.options.findIndex((option) => option.value === props.modelValue)
   )
+  void nextTick(() => root.value?.querySelector<HTMLElement>('.select-menu')?.focus())
 }
 
 function choose(option: CyberSelectOption): void {
@@ -77,6 +79,9 @@ function onMenuKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     close()
     root.value?.querySelector<HTMLButtonElement>('.select-trigger')?.focus()
+  } else if (event.key === 'Tab') {
+    close()
+    root.value?.querySelector<HTMLButtonElement>('.select-trigger')?.focus()
   }
 }
 
@@ -86,9 +91,10 @@ function onDocumentPointerdown(event: PointerEvent): void {
 }
 
 watch(open, (value) => {
+  emit('open-change', value)
   if (value) document.addEventListener('pointerdown', onDocumentPointerdown, true)
   else document.removeEventListener('pointerdown', onDocumentPointerdown, true)
-})
+}, { flush: 'sync' })
 
 watch(
   () => props.disabled,
@@ -98,6 +104,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  if (open.value) emit('open-change', false)
   document.removeEventListener('pointerdown', onDocumentPointerdown, true)
 })
 </script>

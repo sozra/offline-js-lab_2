@@ -7,7 +7,7 @@
 Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不是完整 IDE：
 
 - 左侧 Monaco Editor；
-- 右侧 stdout、stderr、编译及 npm 输出；
+- 右侧 stdout、stderr、编译及 npm 输出，或独立 React JSX/TSX 组件预览；
 - 手动运行与 500 ms 防抖实时运行；
 - 标准 npm CLI 管理工作区依赖；
 - macOS 开发、Windows 公司内网使用；
@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.3.7 技术栈
+## 2. v0.4.0 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -28,6 +28,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 - 系统 npm CLI：工作区依赖；
 - Vitest：单元和结构测试；
 - 原生 CSS：Cyberdeck 设计系统，不引入 UI 框架。
+- React/ReactDOM：来自用户工作区 npm 的组件预览运行时，不替换 Vue 应用外壳。
 
 ## 3. 必须保持的安全边界
 
@@ -184,12 +185,16 @@ clearOutputOnRun
 
 | Key | 类型 | 默认值 |
 |---|---|---|
-| `offlineJsLab.code` | string | 示例代码 |
-| `offlineJsLab.language` | `typescript` / `javascript` | `typescript` |
+| `offlineJsLab.code` | string，旧键只迁移 | 示例代码 |
+| `offlineJsLab.language` | 旧语言键只迁移 | `typescript` |
 | `offlineJsLab.runMode` | `manual` / `live` | `manual` |
 | `offlineJsLab.clearOutputOnRun` | boolean string | `true` |
 | `offlineJsLab.alignOutputToSource` | boolean string | `false` |
 | `offlineJsLab.splitRatio` | number string | `0.5` |
+| `offlineJsLab.documentSession` | version 1 JSON：code/language/input/filePath/dirty/lastSavedCode | 迁移旧草稿或默认 |
+| `offlineJsLab.snippetLibrary` | version 1 JSON：snippets | 空列表 |
+| `offlineJsLab.pinnedResult.v1` | RunSnapshot JSON | 无 |
+| `offlineJsLab.inputCollapsed` | boolean string | `true` |
 
 新增键时：
 
@@ -239,6 +244,7 @@ OfflineJsLabWorkspace/
 
 ```text
 Electron 44.2.0
+Embedded Node 24.20.0（实机验证；应用构建沿用下面的保守 target）
 electron-vite 5.0.0
 Node target node24.18
 Chromium target chrome152
@@ -350,6 +356,7 @@ npm start
 npm run check:source
 npm run typecheck
 npm test
+npm run test:electron -- --node=/absolute/node --dependencies=/absolute/node_modules
 npm run check
 npm run build
 ```
@@ -389,7 +396,7 @@ Renderer/UI 改动还要人工检查：
 14. 新建、打开、保存、另存为；
 15. Dependency Matrix 安装 Lodash/Day.js；
 16. 窗口缩至最小尺寸无关键控件重叠；
-17. 减少动态效果设置下无持续扫描动画。
+17. 系统减少动态效果设置下仍保持项目约定的完整动画。
 
 AI agent 完成修改时：
 
@@ -415,3 +422,26 @@ AI agent 完成修改时：
 - Preload 与 Main 按原始消息共同执行 8 MB 上限，达到限制明确报告并销毁预览，不得静默停止日志转发。
 - 浏览器普通 getter 不求值；浏览器无法提前识别 Proxy，属性描述符读取可能触发其 trap，只发生在隔离预览进程。不要宣传恶意代码安全沙箱。
 - `recent-files.ts` 在 userData/recent-files.json 原子保存最近 12 个用户明确打开/保存的路径；open-recent 仅接受该列表中的路径。
+
+## 18. v0.4.0 Renderer 工作流
+
+- `ScriptLanguage` 为 javascript/typescript/jsx/tsx；前两者运行于系统 Node，后两者运行于独立浏览器预览。Monaco 用 JS/TS language ID + 正确 .jsx/.tsx 模型 URI，切换时保留代码并探测 Worker；两个 defaults 都配置 React JSX，注入 lab 全局声明。
+- `useDocumentSession.ts` 单键原子恢复文件路径、dirty 和 lastSavedCode；保存文件前捕获提交源码，异步保存期间的新编辑不能被标为已保存。
+- `useLabLibrary.ts` 管理 60 个/2 M 字符的本地收藏与模板；输入与代码一并保存。加载收藏/历史走统一放弃修改确认。
+- 损坏、部分非法或未知版本的收藏记录只读保留，不得通过下一次保存静默覆盖；可读条目仍可载入恢复。
+- `InputPanel.vue` 只校验/格式化 JSON 或文本，最大 512 K 字符；空 JSON 无效，纯文本空值有效。折叠不改变输入，输入编辑参与 500 ms Live 防抖。
+- `inputFormatting.ts` 在校验后只重排 JSON 空白，保留数字词法值和重复键，并限制格式化膨胀后的大小。
+- `useRunHistory.ts` 保存当前会话最近 12 次/12 M 字符的有界不可变运行快照；固定基线最多 1 M 字符并持久化。截断必须显式标记，存储失败保持旧基线并提示。
+- `useOutputBuffer.ts` 保留 runId/sourceRevision/location/values，跨 run 或源码版本不得合并；8 M 字符/5000 块界面缓冲超限时显式提示。Main 的 8 MB wire 输出限制仍独立有效。
+- `OutputConsole.vue` 支持运行选择、源行对齐、搜索/类型过滤、复制、ValueTree 树/表格与恢复。完整顺序不能混淆为单次运行；代码/输入过期时暂停定位和滚动。
+- `sourceLocation.ts` 统一入口文件匹配，兼容文件 URL、相对路径和 Windows 路径；依赖文件错误保留在 UNMAPPED，不使用其行号对齐当前编辑器。
+- 对象树按需挂载；复制快照必须保留稀疏数组索引、自定义属性和特殊值标记。
+- `RunCompareDialog.vue` 仅比较stdout/stderr/expression，最多每侧500行/100 K字符；截断不能推断全量一致，恢复必须复制快照并确认当前修改。
+- `PreviewPane.vue` 只报告 DOM bounds；App 负责IPC与状态。任何模态、切到控制台或启动覆盖层出现时，立即隐藏原生View，避免压在Vue弹窗之上。
+- Node运行、Node准备态、预览构建/活动页面、npm必须明确协调；Node runId与最近run snapshot id、preview id不得混用。普通Node自然退出立即结束运行状态，Browser ready可早于start返回。
+- Main `stopHostWork()` 在窗口关闭、非同文档的主frame导航、Renderer崩溃与退出时回收Node/npm/preview；不能仅停止预览，否则重新加载后Node旧runId丢失会留下无法控制的进程。
+- npmBusy只暂停执行，不把Monaco设为只读；弹窗日志与脚本清空偏好分离。
+- `useDialogFocus.ts` 统一Tab/焦点恢复/Escape。App对DOM快捷键、Monaco事件与Electron菜单统一检查模态/运行阻塞条件。
+- 语言和最近文件菜单展开期间也隐藏原生预览，但不能将菜单状态并入会使菜单自身禁用的模态状态。
+- `scripts/electron-smoke.cjs` 基于生产构建，在独立临时 profile/workspace 驱动整 App；先 build 再执行 test:electron，不与正在读取 out 的测试并行重建。
+- JSX实际测试包括hooks点击、输入、缺包、编译失败保留、重启重置、错误行列、无限循环停止后恢复、弹窗遮挡、生产Preload和Worker加载。Windows实机未执行时不得声称通过。
