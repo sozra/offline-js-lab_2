@@ -1,6 +1,6 @@
 {
   "name": "offline-js-lab",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A local JavaScript and TypeScript scratchpad with a Vue-powered cyberdeck interface.",
   "main": "./out/main/index.js",
   "private": true,
@@ -24,10 +24,11 @@
     "build": "npm run check:source && npm run typecheck && electron-vite build",
     "prepreview": "npm run electron:ensure",
     "preview": "electron-vite preview",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win --x64",
-    "dist:nsis": "npm run build && electron-builder --win nsis --x64",
-    "dist:portable": "npm run build && electron-builder --win portable --x64",
+    "dist:mac": "node scripts/package.mjs mac",
+    "dist:win": "node scripts/package.mjs win",
+    "dist:nsis": "node scripts/package.mjs nsis",
+    "dist:portable": "node scripts/package.mjs portable",
+    "dist:check": "node scripts/package.mjs --check",
     "check:source": "node scripts/check-source.mjs"
   },
   "dependencies": {

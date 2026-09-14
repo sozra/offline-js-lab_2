@@ -9,6 +9,7 @@ const requiredFiles = [
   'AGENTS.md',
   'electron.vite.config.ts',
   'scripts/ensure-electron.mjs',
+  'scripts/package.mjs',
   'src/main/index.ts',
   'src/main/source-instrumenter.ts',
   'src/main/run-manager.ts',

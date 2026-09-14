@@ -1,6 +1,8 @@
-# Offline JS Lab v0.4.2
+# Offline JS Lab v0.4.3
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad，也支持 React JSX / TSX 交互组件预览。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
+
+v0.4.3 增加本地 Electron 打包入口：`dist:* -- --electron-dist <路径>` 支持官方 ZIP、ZIP 所在目录或完整解压目录，也支持环境变量与 package.json 配置。打包前检查本地文件，失败不回退下载；`dist:check` 可单独预检，`--dir` 可只生成应用目录。
 
 v0.4.2 修复源行对齐的实际屏幕位置：输出辅助控件移到底部，编辑器与输出共享可视起点、底部和滚动范围，并跟随 Monaco 的折叠行位置。过期结果改为底部「旧结果」入口，点击查看说明或恢复快照；复制和历史状态不再插入占位横幅。编辑器增加候选灰字预览与 Tab 补全。
 
@@ -517,6 +519,96 @@ npm run dist:portable
 ```
 
 未配置代码签名证书。
+
+### 使用已下载的 Electron 打包
+
+`npm run build` 只编译 Main / Preload / Renderer，不下载也不运行 Electron。`dist:*` 现在先校验打包参数，再执行 `npm run build`，最后调用 electron-builder 生成 `release/` 下的应用。未指定本地路径时，仍使用原有下载/缓存流程。
+
+Windows（PowerShell，默认目标为 x64）：
+
+```powershell
+# ZIP 不需要手动解压；路径有空格时保留引号
+npm run dist:win -- --electron-dist "D:\offline packages\electron-v44.2.0-win32-x64.zip"
+
+# 同一参数也适用于分别生成 NSIS、Portable
+npm run dist:portable -- --electron-dist "D:\offline packages\electron-v44.2.0-win32-x64.zip"
+
+# 也可提供完整解压目录，根目录中应有 electron.exe、version、icudtl.dat 等
+npm run dist:nsis -- --electron-dist "D:\offline packages\electron-win32-x64"
+```
+
+macOS（Apple Silicon 示例；Intel Mac 使用 `--arch x64` 及对应 ZIP）：
+
+```bash
+npm run dist:mac -- --arch arm64 --electron-dist "/Volumes/offline/electron-v44.2.0-darwin-arm64.zip"
+
+# 复用当前项目已经准备好的本机 Electron
+npm run dist:mac -- --electron-dist ./node_modules/electron/dist
+```
+
+也可传入同时存放多个官方 ZIP 的目录；脚本仅选择 `electron-v<项目 Electron 版本>-<目标平台>-<目标架构>.zip`。目标平台名称为 `win32` / `darwin`；Windows 默认 x64，macOS 默认当前 Node 的架构，均可用 `--arch x64` / `--arch arm64` 明确指定。不会将 macOS 的开发 Electron 自动用于 Windows 打包。
+
+三种配置入口优先级如下；所有相对路径以项目根目录为基准：
+
+1. 命令参数 `--electron-dist <路径>`（或 `--electron-dist=<路径>`）。
+2. 环境变量 `OFFLINE_JS_LAB_ELECTRON_DIST`。
+3. `package.json` 的 `build.electronDist` 字符串路径。
+
+经常离线打包时可配置环境变量，无需改动仓库中的机器专用路径：
+
+```powershell
+$env:OFFLINE_JS_LAB_ELECTRON_DIST = "D:\offline packages\electron"
+npm run dist:win
+# 恢复默认下载/缓存流程（也需移除 package.json 中的本地配置，如有）
+Remove-Item Env:OFFLINE_JS_LAB_ELECTRON_DIST
+```
+
+macOS shell 的等价写法：
+
+```bash
+OFFLINE_JS_LAB_ELECTRON_DIST="/Volumes/offline/electron" npm run dist:mac
+```
+
+配置文件方式是在现有 `build` 对象中增加字段，保留其他字段：
+
+```json
+"electronDist": "D:/offline packages/electron"
+```
+
+只检查路径、版本、目标和架构，不编译、不下载、不生成产物：
+
+```powershell
+npm run dist:check -- win --electron-dist "D:\offline packages\electron"
+npm run dist:check -- mac --arch arm64 --electron-dist ./node_modules/electron/dist
+```
+
+只生成应用目录（macOS 为 `.app`，Windows 为 `win-unpacked`），跳过安装包生成：
+
+```powershell
+npm run dist:win -- --dir --electron-dist "D:\offline packages\electron"
+```
+
+路径不存在、空值、版本或架构不匹配时立即失败，不回退网络下载。ZIP 预检依据官方文件名和文件头；解压目录检查 `version`、平台关键文件和可执行文件的架构头，不执行外部 Electron。ZIP 的完整性在实际解压时验证；预检不做来源认证或完整资源审计。请保留官方 ZIP 原名及其完整内容，不通过重命名绕过检查。解压目录应指向包含 `Electron.app` / `electron.exe` 和 `version` 的根目录，不能只提供 `.app`、`.exe` 或 npm 的 `.tgz`。实现复用 [electron-builder 的 electronDist 能力](https://www.electron.build/v26/docs/api/electron-builder.interface.configuration/#electrondist)。
+
+### 完全离线构建还需准备的内容
+
+本地 `electronDist` 只消除 **Electron 发行包下载**。它不代替以下缓存或工具：
+
+- 项目 npm 依赖：先在相同系统/架构上安装，或准备完整 npm 缓存/内网 Registry。`npm ci --offline` 仍要求所有依赖已缓存；esbuild 等依赖包含平台二进制。
+- electron-builder 的辅助工具：Windows NSIS、Portable 可能需要 NSIS、资源处理/签名工具等；`--dir` 只跳过安装包生成，不保证跳过全部辅助工具。建议在联网的同类机器上用同一依赖版本、目标和命令完成一次打包，再复制完整 builder 缓存到离线机器。
+- 跨系统打包需要的系统工具及可选签名材料：本地 Electron 不消除这些平台限制。
+
+可在联网准备与离线构建时均指定缓存位置，例如 PowerShell：
+
+```powershell
+$env:ELECTRON_BUILDER_CACHE = "D:\offline packages\electron-builder-cache"
+$env:OFFLINE_JS_LAB_ELECTRON_DIST = "D:\offline packages\electron"
+npm run dist:win
+```
+
+参考 [electron-builder 离线构建指南](https://www.electron.build/tutorials/offline-air-gapped-builds/)。`ELECTRON_SKIP_BINARY_DOWNLOAD` 只控制 Electron 安装准备，不会让 electron-builder 自动使用本地发行包。`npm start` / `npm run preview` 仍使用 `electron:ensure` 准备本机开发二进制；新增的打包路径配置不改写 `node_modules/electron`、`path.txt` 或开发启动环境。
+
+2026-09-14 验证 v0.4.3：`npm run check` 通过（19 组 / 135 项）；macOS arm64 分别使用本地完整解压目录和官方 ZIP 执行 `dist:mac -- --dir`，均完成源码构建和 `.app` 打包。ZIP 场景通过临时 Node preload 禁止构建进程的 TCP 连接，并将 Electron 下载镜像指向不可用端口，仍打包成功。已检查产物版本、Main / Preload / Renderer 与 runner 文件。本次未执行 Windows 实机、DMG / NSIS / Portable 安装包或应用界面冒烟测试。
 
 ## 当前非目标
 

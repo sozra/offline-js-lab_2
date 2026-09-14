@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.4.2 技术栈
+## 2. v0.4.3 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -71,6 +71,7 @@ Vue 应用、Monaco、composables 与 CSS。Renderer 不直接使用 `fs`、`chi
 ## 5. 关键文件职责
 
 - `scripts/ensure-electron.mjs`：检查 `electron/path.txt` 与可执行文件，并在缺失时调用本地 `install-electron`。
+- `scripts/package.mjs`：打包参数预检、本地 Electron 选择、源码构建与 electron-builder 公共 API 编排；不执行外部 Electron，不改写开发二进制。
 - `src/main/index.ts`：BrowserWindow、菜单、可信 IPC、文件对话框。
 - `src/main/runtime.ts`：Node/npm 路径解析与子进程环境。
 - `src/main/workspace.ts`：默认工作区、原子设置写入、package.json、包与 `.d.ts` 扫描。
@@ -370,6 +371,9 @@ npm run dist:mac
 npm run dist:win
 npm run dist:nsis
 npm run dist:portable
+npm run dist:check -- win --electron-dist /absolute/path/to/electron
+npm run dist:win -- --electron-dist /absolute/path/to/electron
+npm run dist:mac -- --dir --electron-dist ./node_modules/electron/dist
 ```
 
 ## 16. 测试与交付
@@ -457,4 +461,14 @@ AI agent 完成修改时：
 - 对齐时关闭 Monaco sticky scroll，避免固定标题遮挡源行；关闭对齐恢复。左右滚动范围需计入各自 viewport 与水平滚动条，底部不能产生额外漂移。ResizeObserver/rAF 在销毁时清理。
 - 本地补全显式启用 quickSuggestions、参数提示、suggest.preview 与 tabCompletion；预览来自现有语言服务候选，不调用在线 AI，不生成任意后续代码。Tab 无候选时仍缩进，撤销、选择与片段 Tab 顺序由 Monaco 管理，禁止全局拦截 Tab。
 - Cmd/Ctrl+Space 或 Alt/Option+/ 与右键「输入建议（Tab 补全）」等价。保留 Ctrl/Cmd+/ 的物理键兜底与格式化命令。
-- 生产 Electron smoke 要验证真实行 DOM 的屏幕坐标、两侧滚动及底部、输入展开/窗口调整、旧结果无占位横幅，以及候选预览、Tab 补全与普通缩进/撤销。版本为 0.4.2；Windows 实机未测必须如实说明。
+- 生产 Electron smoke 要验证真实行 DOM 的屏幕坐标、两侧滚动及底部、输入展开/窗口调整、旧结果无占位横幅，以及候选预览、Tab 补全与普通缩进/撤销。此工作流始于 0.4.2；Windows 实机未测必须如实说明。
+
+## 20. v0.4.3 本地 Electron 打包
+
+- `dist:mac/win/nsis/portable` 统一经过 `scripts/package.mjs`：先预检，再 `npm run build`，最后 electron-builder。`dist:check -- <目标>` / `--check` 只预检；`--dir` 仅生成应用目录。Windows 默认 x64，macOS 默认当前 Node 架构；`--arch` 支持 x64 / arm64。
+- 本地路径优先级：`--electron-dist` > `OFFLINE_JS_LAB_ELECTRON_DIST` > `package.json build.electronDist`；相对路径基于项目根目录。没有配置时保留 builder 默认缓存/下载流程；明确配置的空值或无效路径必须失败，不回退下载。
+- 支持官方 ZIP、含多个官方 ZIP 的目录和完整解压根目录。ZIP 按项目锁定的 Electron 版本、目标平台、架构匹配原始文件名并检查 ZIP 头；解压目录检查 version、关键资源及 PE / Mach-O 架构头。不得通过执行目标 Electron 检测架构，避免跨平台执行和副作用。不得将文件名校验描述成 ZIP 内容校验或来源认证。
+- 本地路径通过 electron-builder 的字符串 `electronDist` 配置传递，不使用可能吞掉异常后回退下载的 hook。复制/解压由 builder 完成；不更改用户的离线源文件、node_modules/electron/path.txt 或开发启动逻辑。
+- `npm run build` 只编译应用；不能附加本机 Electron 下载前置步骤，否则 macOS 打 Windows 包也会被本机下载阻塞。原有 `prestart/predev/prepreview` 仍保留。
+- 本地发行包只免去 Electron 下载，完全离线还需要项目 npm 依赖、平台系统工具和 builder 辅助工具缓存（`ELECTRON_BUILDER_CACHE`）。不能承诺仅设置 `ELECTRON_SKIP_BINARY_DOWNLOAD` 或 `--dir` 就能完整离线打包。打包 API 使用 `publish: 'never'`。
+- 涉及命令改动时验证在线默认计划、配置优先级、空格路径、版本/平台/架构错误、不完整文件及预检无副作用；实际打包验证须注明宿主系统和产物种类，不声称未执行的 Windows/安装包测试通过。
