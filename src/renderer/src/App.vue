@@ -19,6 +19,8 @@ import { useRunHistory } from './composables/useRunHistory'
 import { isEntrySourceLocation } from './composables/sourceLocation'
 import { useOutputBuffer } from './composables/useOutputBuffer'
 import { useResizableSplit } from './composables/useResizableSplit'
+import { useAlignedPaneLayout } from './composables/useAlignedPaneLayout'
+import type { SourceViewport } from './editorLayout'
 import { DEFAULT_JAVASCRIPT, DEFAULT_TYPESCRIPT } from './defaults'
 import type { LanguageServiceProbeResult } from './monaco'
 import { hasReactJsxRuntimeTypes } from './jsxTypeSupport'
@@ -46,6 +48,7 @@ const editorRef = ref<InstanceType<typeof MonacoEditor>>()
 const splitHost = ref<HTMLElement>()
 const editorReady = ref(false)
 const editorScrollTop = ref(0)
+const editorViewport = ref<SourceViewport>()
 const languageServiceMessage = ref('LANGUAGE SERVICE LINKING')
 const typeIndexMessage = ref('TYPE INDEX PENDING')
 const editorMessage = computed(() => `${languageServiceMessage.value} // ${typeIndexMessage.value}`)
@@ -90,6 +93,9 @@ const previewStates = new Map<string, PreviewState>()
 const resultTab = ref<'preview' | 'console'>(isBrowserLanguage(language.value) ? 'preview' : 'console')
 const previewConsole = ref(false)
 const browserMode = computed(() => isBrowserLanguage(language.value))
+const sourceAlignmentAvailable = computed(() => !browserMode.value || resultTab.value === 'console')
+const sourceAlignmentEnabled = computed(() => alignOutputToSource.value && sourceAlignmentAvailable.value)
+useAlignedPaneLayout(splitHost, sourceAlignmentEnabled)
 const needsReactTypes = computed(() => browserMode.value && !hasReactJsxRuntimeTypes(typeDefinitions.value))
 const history = useRunHistory()
 const { runs, selectedId, pinned } = history
@@ -610,6 +616,7 @@ onBeforeUnmount(() => {
             :language="language"
             :type-definitions="typeDefinitions"
             :read-only="modalVisible"
+            :align-to-source="sourceAlignmentEnabled"
             @change="onEditorChange"
             @ready="onEditorReady"
             @language-service="onLanguageServiceStatus"
@@ -617,6 +624,7 @@ onBeforeUnmount(() => {
             @save="saveFile(false)"
             @open="openFile()"
             @scroll="editorScrollTop = $event"
+            @viewport="editorViewport = $event"
           />
         </div>
         <InputPanel v-model="input" v-model:collapsed="inputCollapsed" />
@@ -670,8 +678,10 @@ onBeforeUnmount(() => {
           :status-kind="runStatusKind"
           :clear-on-run="clearOutputOnRun"
           :align-to-source="alignOutputToSource"
+          :alignment-available="sourceAlignmentAvailable"
           :editor-line-count="editorLineCount"
           :editor-scroll-top="editorScrollTop"
+          :editor-viewport="editorViewport"
           :runs="runs"
           :selected-run-id="selectedId"
           :current-run-id="currentRunId"

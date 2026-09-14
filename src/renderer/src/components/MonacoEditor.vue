@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ScriptLanguage, TypeDefinitionFile } from '@shared/types'
 import { isTypeScriptLanguage, languageExtension } from '@shared/languages'
+import { SOURCE_LINE_HEIGHT, SOURCE_PADDING_TOP, SOURCE_PADDING_BOTTOM, type SourceViewport } from '../editorLayout'
 import {
   configureJsxTypeSupport,
   getTypeScriptApi,
@@ -15,6 +16,7 @@ const props = defineProps<{
   language: ScriptLanguage
   typeDefinitions: TypeDefinitionFile[]
   readOnly?: boolean
+  alignToSource?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +27,7 @@ const emit = defineEmits<{
   save: []
   open: []
   scroll: [scrollTop: number]
+  viewport: [viewport: SourceViewport]
   'language-service': [result: LanguageServiceProbeResult]
 }>()
 
@@ -35,12 +38,14 @@ let applyingExternalValue = false
 let typeDisposables: monaco.IDisposable[] = []
 let actionDisposables: monaco.IDisposable[] = []
 let languageProbeGeneration = 0
+let viewportFrame = 0
 let diagnosticDecorations: monaco.editor.IEditorDecorationsCollection | undefined
 
 const requiredEditorActions = [
   'editor.action.commentLine',
   'editor.action.blockComment',
-  'editor.action.formatDocument'
+  'editor.action.formatDocument',
+  'editor.action.triggerSuggest'
 ] as const
 
 function formatError(error: unknown): string {
@@ -86,6 +91,14 @@ function registerEditorActions(): void {
   if (!editor) return
 
   actionDisposables.push(
+    editor.addAction({
+      id: 'offline-js-lab.trigger-suggest',
+      label: '输入建议（Tab 补全）',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, monaco.KeyMod.Alt | monaco.KeyCode.Slash],
+      contextMenuGroupId: '1_modification',
+      contextMenuOrder: 4,
+      run: () => runEditorAction('editor.action.triggerSuggest')
+    }),
     editor.addAction({
       id: 'offline-js-lab.toggle-line-comment',
       label: '切换行注释',
@@ -188,20 +201,34 @@ onMounted(() => {
       strings: true
     },
     suggestOnTriggerCharacters: true,
+    quickSuggestionsDelay: 100,
+    tabCompletion: 'on',
+    acceptSuggestionOnEnter: 'smart',
+    suggestSelection: 'first',
+    wordBasedSuggestions: 'currentDocument',
+    snippetSuggestions: 'inline',
+    suggest: {
+      preview: true,
+      previewMode: 'prefix',
+      localityBonus: true,
+      showStatusBar: true
+    },
     parameterHints: { enabled: true },
     formatOnPaste: true,
     formatOnType: true,
     fontFamily: "'Fira Code', SFMono-Regular, Cascadia Code, Consolas, Liberation Mono, Menlo, monospace",
     fontLigatures: true,
     fontSize: 13,
-    lineHeight: 21,
+    lineHeight: SOURCE_LINE_HEIGHT,
     minimap: { enabled: false },
-    padding: { top: 15, bottom: 24 },
+    padding: { top: SOURCE_PADDING_TOP, bottom: SOURCE_PADDING_BOTTOM },
     renderWhitespace: 'selection',
     renderLineHighlight: 'all',
     roundedSelection: false,
     scrollBeyondLastLine: false,
     smoothScrolling: true,
+    stickyScroll: { enabled: !props.alignToSource },
+    scrollbar: { horizontal: 'visible', horizontalScrollbarSize: 9, verticalScrollbarSize: 9 },
     tabSize: 2,
     wordWrap: 'off',
     bracketPairColorization: { enabled: true },
@@ -222,7 +249,11 @@ onMounted(() => {
 
   editor.onDidScrollChange((event) => {
     if (event.scrollTopChanged) emit('scroll', event.scrollTop)
+    scheduleViewport()
   })
+  editor.onDidLayoutChange(scheduleViewport)
+  editor.onDidContentSizeChange(scheduleViewport)
+  editor.onDidChangeHiddenAreas(scheduleViewport)
 
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => emit('run'))
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => emit('save'))
@@ -235,8 +266,24 @@ onMounted(() => {
   resizeObserver.observe(container.value)
   container.value.addEventListener('keydown', onNativeEditorKeydown, true)
   emit('ready')
+  scheduleViewport()
   window.setTimeout(() => void verifyLanguageService(), 0)
 })
+
+function scheduleViewport(): void {
+  if (viewportFrame) return
+  viewportFrame = requestAnimationFrame(() => {
+    viewportFrame = 0
+    if (!editor) return
+    const lines: SourceViewport['lines'] = []
+    for (const range of editor.getVisibleRanges()) {
+      for (let line = range.startLineNumber; line <= range.endLineNumber; line++) {
+        lines.push({ line, top: editor.getTopForLineNumber(line) })
+      }
+    }
+    emit('viewport', { scrollTop: editor.getScrollTop(), scrollHeight: editor.getScrollHeight(), height: editor.getLayoutInfo().height, lines })
+  })
+}
 
 watch(
   () => props.modelValue,
@@ -274,6 +321,11 @@ watch(
 )
 
 watch(
+  () => props.alignToSource,
+  (align) => { editor?.updateOptions({ stickyScroll: { enabled: !align } }); scheduleViewport() }
+)
+
+watch(
   () => props.readOnly,
   (readOnly) => editor?.updateOptions({ readOnly: Boolean(readOnly) })
 )
@@ -281,6 +333,7 @@ watch(
 onBeforeUnmount(() => {
   languageProbeGeneration += 1
   resizeObserver?.disconnect()
+  if (viewportFrame) cancelAnimationFrame(viewportFrame)
   if (container.value) container.value.removeEventListener('keydown', onNativeEditorKeydown, true)
   for (const disposable of typeDisposables) disposable.dispose()
   for (const disposable of actionDisposables) disposable.dispose()

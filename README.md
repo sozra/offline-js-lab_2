@@ -1,6 +1,8 @@
-# Offline JS Lab v0.4.1
+# Offline JS Lab v0.4.2
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad，也支持 React JSX / TSX 交互组件预览。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
+
+v0.4.2 修复源行对齐的实际屏幕位置：输出辅助控件移到底部，编辑器与输出共享可视起点、底部和滚动范围，并跟随 Monaco 的折叠行位置。过期结果改为底部「旧结果」入口，点击查看说明或恢复快照；复制和历史状态不再插入占位横幅。编辑器增加候选灰字预览与 Tab 补全。
 
 v0.4.1 将「比较两次运行」升级为 Monaco 只读双栏差异视图：红/绿显示删除和新增，行内变化字符进一步高亮，可跳转上一处/下一处差异。修复工作区仅安装 React 运行时、缺少类型声明时 JSX 编辑器出现 TS2875 的问题，并提供「补全 React 类型」入口。
 
@@ -96,7 +98,15 @@ npm 安装期间可以继续编辑，暂缓运行。依赖弹窗显示阻塞原�
 
 脚本使用真实 Electron 窗口、Monaco 键盘输入、应用 IPC 和组件交互，只有原生打开/保存对话框的路径选择被替换为测试文件。它在系统临时目录创建独立配置和工作区，保留报告及截图，不使用日常工作区。覆盖脚本结束与停止、Live 连续编辑、输入、固定比较、收藏、草稿恢复、React 交互与预览显隐、编译失败保留画面和最小窗口布局。
 
+2026-09-14 在 macOS 验证 v0.4.2：`npm run check`（18 组 / 126 项）与 `npm run build` 通过；15 项生产 Electron 场景全部通过，Renderer 控制台错误为空。新增场景测量首屏、长代码底部、反向滚动、输入面板展开、窗口缩放和折叠/展开后的代码与输出行屏幕坐标（误差不超过 1 px），并实际验证候选灰字预览、变量/属性 Tab 补全及无候选时缩进和撤销。Windows 实机未执行。
+
 2026-09-12 在 macOS 验证 v0.4.1：`npm run check` 通过，18 组共 126 项测试通过；`npm run build` 与整 App 12 项 Electron 场景通过，Renderer 控制台错误为空，刷新后旧脚本进程确实退出且可再次运行。比较场景检查了只高亮变化数字的字符色块、差异导航和快照恢复；React 场景检查了缺类型时入口预填与原生预览显隐。JSX/TSX 的有/无类型诊断由真实 TypeScript language service 单元测试覆盖。此前独立后端测试还验证了预览无限循环停止、8 MB 输出保护和多次运行复用一个 Session。Windows 路径有单元覆盖，尚未进行 Windows 实机验证；安装包签名及发布不在本次验证范围内。
+
+## 离线输入建议与 Tab 补全
+
+输入变量名、对象属性或函数时自动显示候选，并用灰字预览选中候选的剩余部分。Tab 接受候选，方向键切换，Esc 关闭；没有候选时 Tab 正常缩进。括号内显示参数提示。可按 Cmd/Ctrl+Space 主动触发，也可用 Alt/Option+/ 或右键菜单「输入建议（Tab 补全）」避开系统输入法快捷键。
+
+这些建议使用当前文档、JS/TS 语言服务和工作区已安装的 `.d.ts`，完全离线；灰字是候选预览，不是 AI 生成整段代码。相关配置使用 [Monaco 官方输入选项](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorOptions.html)。
 
 ## 主要能力
 
@@ -352,10 +362,12 @@ offlineJsLab.clearOutputOnRun
 
 输出区顶部的 `LINE:SYNC` 控制显示方式：
 
-- 开启：带源位置的输出按源代码行排列，行高与 Monaco 的 21 px 行高一致；滚动任意一侧会同步另一侧；
+- 开启：带源位置的输出按 Monaco 实际源行位置排列（含折叠），两侧可视区域的顶部、底部和滚动范围一致；滚动任意一侧会同步另一侧；
 - 关闭：恢复按实际发生时间追加的完整输出；
 - 编译错误、`process.stdout.write()`、依赖包内部打印等没有可靠源位置的内容，会在对齐模式的 `UNMAPPED` 区显示；
-- 该开关只改变输出展示，不改变脚本的执行次序。
+- 该开关只改变输出展示，不改变脚本的执行次序。对齐时暂停编辑器 sticky scroll，关闭对齐后恢复；
+- 历史、固定比较与搜索在输出底部。代码或输入改变后只显示轻量「旧结果」，定位和同步暂停；重新运行或恢复快照后继续；
+- 同时显示组件预览与控制台时使用顺序输出；切换到控制台标签后按原偏好恢复源行对齐。
 
 以下表达式默认会像 Scratchpad/REPL 一样显示结果：
 
@@ -447,6 +459,9 @@ Cyberdeck 界面以以下原则实现：
 | 停止 | `Cmd + .` | `Ctrl + .` |
 | 切换行注释 | `Cmd + /` | `Ctrl + /` |
 | 切换块注释 | `Cmd + Shift + /` | `Ctrl + Shift + /` |
+| 输入建议 | `Cmd + Space` / `Option + /` | `Ctrl + Space` / `Alt + /` |
+| 接受输入候选 | `Tab` | `Tab` |
+| 关闭输入候选 | `Esc` | `Esc` |
 | 格式化文档 | `Shift + Option + F` | `Shift + Alt + F` |
 
 ## 本地持久化

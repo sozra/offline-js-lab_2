@@ -26,7 +26,7 @@ const packageJson = JSON.parse(read('package.json')) as {
 
 describe('Vue renderer architecture', () => {
   it('使用 Vue 3 + electron-vite + TypeScript + Monaco', () => {
-    expect(packageJson.version).toBe('0.4.1')
+    expect(packageJson.version).toBe('0.4.2')
     expect(packageJson.dependencies.vue).toBeTruthy()
     expect(packageJson.dependencies['monaco-editor']).toBe('0.56.0')
     expect(packageJson.devDependencies['electron-vite']).toBeTruthy()
@@ -53,7 +53,7 @@ describe('Vue renderer architecture', () => {
     expect(app).toMatch(/offlineJsLab\.alignOutputToSource/)
     expect(app).toMatch(/@source-scroll="editorRef\?\.setScrollTop\(\$event\)"/)
     expect(output).toMatch(/LINE:SYNC/)
-    expect(output).toMatch(/ALIGNED_LINE_HEIGHT = 21/)
+    expect(read('src/renderer/src/editorLayout.ts')).toMatch(/SOURCE_LINE_HEIGHT = 21/)
     expect(monacoEditor).toMatch(/onDidScrollChange/)
     expect(monacoEditor).toMatch(/setScrollTop/)
     expect(css).toMatch(/\.aligned-output-row/)

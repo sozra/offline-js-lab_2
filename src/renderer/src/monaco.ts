@@ -174,6 +174,7 @@ monaco.editor.defineTheme('cyberdeck-2077', {
     'editorSuggestWidget.background': '#0B1014',
     'editorSuggestWidget.border': '#00F0FF55',
     'editorSuggestWidget.selectedBackground': '#18323A',
+    'editorGhostText.foreground': '#7E919B',
     'editorHoverWidget.background': '#0B1014',
     'editorHoverWidget.border': '#FF003C66',
     'scrollbarSlider.background': '#00F0FF20',

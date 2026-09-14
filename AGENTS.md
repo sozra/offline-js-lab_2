@@ -15,7 +15,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 
 不要主动扩展账号、云同步、遥测、自动更新、插件市场、团队协作、远程执行、多文件 IDE 或恶意代码沙箱。
 
-## 2. v0.4.1 技术栈
+## 2. v0.4.2 技术栈
 
 - Electron：窗口、菜单、对话框、文件系统、IPC；
 - electron-vite：分别构建 Main、Preload、Renderer；
@@ -448,3 +448,13 @@ AI agent 完成修改时：
 - 语言和最近文件菜单展开期间也隐藏原生预览，但不能将菜单状态并入会使菜单自身禁用的模态状态。
 - `scripts/electron-smoke.cjs` 基于生产构建，在独立临时 profile/workspace 驱动整 App；先 build 再执行 test:electron，不与正在读取 out 的测试并行重建。
 - JSX实际测试包括hooks点击、输入、缺包、编译失败保留、重启重置、错误行列、无限循环停止后恢复、弹窗遮挡、生产Preload和Worker加载。Windows实机未执行时不得声称通过。
+
+## 19. v0.4.2 行对齐与输入建议
+
+- 历史选择、固定比较和搜索位于输出底部；旧结果使用底部「旧结果」详情入口，保留恢复快照，不插入横幅或改变输出起点。复制反馈浮在输出区内；旧预览只在预览头部轻量标识，实际错误仍明确显示。
+- `useAlignedPaneLayout.ts` 在启用源行对齐时测量左右 shell 的交集，通过内部 padding 对齐可视区域的顶部和底部，适应头部换行、窗口缩放及输入折叠；不靠固定头部高度或 magic offset。比较预览和控制台同时显示时暂用顺序输出，切到控制台后恢复对齐偏好。
+- `editorLayout.ts` 定义 Renderer 专用 SourceViewport 与共享 21 px 行高、15/24 px 上下留白。Monaco 通过公开 getVisibleRanges/getTopForLineNumber/getScrollHeight API 报告真实行位置和滚动范围，对齐输出只挂载可见源行（包含折叠）；不得再次仅用源码行号乘行高推断当前编辑视图。旧结果仍按快照行号展示并暂停定位/同步。
+- 对齐时关闭 Monaco sticky scroll，避免固定标题遮挡源行；关闭对齐恢复。左右滚动范围需计入各自 viewport 与水平滚动条，底部不能产生额外漂移。ResizeObserver/rAF 在销毁时清理。
+- 本地补全显式启用 quickSuggestions、参数提示、suggest.preview 与 tabCompletion；预览来自现有语言服务候选，不调用在线 AI，不生成任意后续代码。Tab 无候选时仍缩进，撤销、选择与片段 Tab 顺序由 Monaco 管理，禁止全局拦截 Tab。
+- Cmd/Ctrl+Space 或 Alt/Option+/ 与右键「输入建议（Tab 补全）」等价。保留 Ctrl/Cmd+/ 的物理键兜底与格式化命令。
+- 生产 Electron smoke 要验证真实行 DOM 的屏幕坐标、两侧滚动及底部、输入展开/窗口调整、旧结果无占位横幅，以及候选预览、Tab 补全与普通缩进/撤销。版本为 0.4.2；Windows 实机未测必须如实说明。

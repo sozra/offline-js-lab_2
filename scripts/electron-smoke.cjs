@@ -81,18 +81,46 @@ async function storedDocument() {
   return js(`() => { const raw = localStorage.getItem('offlineJsLab.documentSession'); return raw ? JSON.parse(raw).document : { code: localStorage.getItem('offlineJsLab.code'), language: localStorage.getItem('offlineJsLab.language') } }`)
 }
 async function replaceCode(code, settled = true) {
+  app.focus({ steal: true })
   main.focus(); main.webContents.focus()
+  await wait(() => main.isFocused() && main.webContents.isFocused(), 'native editor window focused')
   await js(`() => { const editor = document.querySelector('.monaco-editor'); if (!editor) throw Error('Monaco missing'); const input = editor.querySelector('textarea.inputarea, .native-edit-context, [contenteditable="true"]'); if (!input) throw Error('Monaco accessible input missing'); input.focus() }`)
+  await pause(100)
   const modifiers = [process.platform === 'darwin' ? 'meta' : 'control']
   main.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers })
   main.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers })
   // sendInputEvent queues native key handling; insertText must wait for the
   // selection event to reach Monaco's actual editor before replacing it.
   await pause(60)
-  await main.webContents.insertText(code)
+  if (code) await main.webContents.insertText(code)
+  else await key('Backspace')
   // Monaco may apply normal editor auto-indentation to multiline native text
   // insertion. Fixture semantics are asserted by real execution in each step.
   if (settled) await wait(async () => (await storedDocument()).code.replace(/\s+/g, ' ').trim() === code.replace(/\s+/g, ' ').trim(), 'Monaco edit persisted')
+}
+async function key(keyCode, modifiers = []) {
+  main.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+  main.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+  await pause(70)
+}
+async function assertSourceAlignment(label, minimum = 2) {
+  await wait(() => js(`() => !document.querySelector('.glitch-burst')`), 'execution animation finishes')
+  await pause(80)
+  const measured = await wait(() => js(`minimum => {
+    const viewport = document.querySelector('.console-viewport').getBoundingClientRect();
+    const code = [...document.querySelectorAll('.editor-shell .view-line')];
+    const rows = [...document.querySelectorAll('.aligned-output-row')].flatMap(row => {
+      const marker = row.textContent.match(/ALIGN_\\d+/)?.[0];
+      const source = code.find(line => marker && line.textContent.includes(marker));
+      if (!source) return [];
+      const left = source.getBoundingClientRect(), right = row.getBoundingClientRect();
+      if (left.top < viewport.top || left.bottom > viewport.bottom - 9) return [];
+      return [{ marker, left: left.top, right: right.top, delta: Math.abs(left.top - right.top) }];
+    });
+    return rows.length >= minimum && rows.every(row => row.delta <= 1) ? rows : false;
+  }`, minimum), label)
+  report.alignment ??= []
+  report.alignment.push({ label, rows: measured })
 }
 async function monitorEvents() {
   await js(`() => {
@@ -237,6 +265,91 @@ async function suite() {
     await click('.output-chunk--stderr .output-location')
     await wait(() => js(`() => Boolean(document.activeElement?.closest('.monaco-editor'))`), 'error location focuses real editor')
     await screenshot('02-runtime-error')
+  })
+  await step('source rows share screen coordinates through resize, scrolling and stale results', async () => {
+    const shortCode = [1, 2, 3].map(line => `console.log("ALIGN_${String(line).padStart(3, '0')}")`).join('\n')
+    await replaceCode(shortCode)
+    await runNode('ALIGN_003')
+    await click('.output-settings > summary')
+    await click('input[aria-label="按源代码行对齐输出"]')
+    await click('.output-settings > summary')
+    await assertSourceAlignment('first three source rows', 3)
+    const topBefore = await js(`() => document.querySelector('.console-viewport').getBoundingClientRect().top`)
+    await replaceCode(shortCode + '\n// changed')
+    await wait(() => exists('.output-context > summary'), 'quiet old-result indicator')
+    assert.ok(Math.abs(await js(`() => document.querySelector('.console-viewport').getBoundingClientRect().top`) - topBefore) <= 1, 'Stale status must not displace source rows')
+    assert.ok(await js(`() => !document.querySelector('.output-stale') && [...document.querySelectorAll('.aligned-output-line')].every(button => button.disabled)`))
+    await click('.output-context > summary')
+    assert.ok(await exists('.output-context button'), 'Snapshot restore remains discoverable')
+    await click('.output-context > summary')
+    await screenshot('10-aligned-stale')
+
+    const longCode = Array.from({ length: 100 }, (_, index) => `console.log("ALIGN_${String(index + 1).padStart(3, '0')}")`).join('\n')
+    await replaceCode(longCode)
+    await runNode('ALIGN_100')
+    await assertSourceAlignment('editor scrolled to end')
+    assert.ok(report.alignment.at(-1).rows.some(row => row.marker === 'ALIGN_100'))
+    await js(`() => { document.querySelector('.console-viewport').scrollTop = 600 }`)
+    await assertSourceAlignment('output scroll drives editor')
+    assert.ok(Math.abs(await js(`() => document.querySelector('.console-viewport').scrollTop`) - 600) <= 1)
+    await js(`() => { document.querySelector('.console-viewport').scrollTop = 0 }`)
+    await assertSourceAlignment('output scroll returns to top')
+    await inputText('{"answer":3}')
+    await assertSourceAlignment('expanded input keeps viewports aligned')
+    await click('.input-panel__toggle')
+    const [width, height] = main.getSize()
+    main.setSize(980, 680)
+    await assertSourceAlignment('minimum window and wrapped controls')
+    main.setSize(width, height)
+    await assertSourceAlignment('restored window size')
+    await screenshot('11-aligned-scrolling')
+    await click('.output-settings > summary')
+    await click('input[aria-label="按源代码行对齐输出"]')
+    await click('.output-settings > summary')
+    await wait(() => exists('.output-entry'), 'chronological view returns')
+    assert.ok(await js(`() => document.querySelector('.output-entries').textContent.includes('ALIGN_001') && document.querySelector('.output-entries').textContent.includes('ALIGN_100')`), 'Unaligned view retains the full output')
+  })
+  await step('folded code uses Monaco view positions and hides folded output rows', async () => {
+    await replaceCode('// #region group\nconsole.log("ALIGN_002")\n// #endregion\nconsole.log("ALIGN_004")\nconsole.log("ALIGN_005")')
+    await runNode('ALIGN_005')
+    await click('.output-settings > summary')
+    await click('input[aria-label="按源代码行对齐输出"]')
+    await click('.output-settings > summary')
+    await assertSourceAlignment('before folding', 3)
+    await js(`() => document.querySelector('.editor-shell textarea.inputarea, .editor-shell .native-edit-context').focus()`)
+    const modifiers = [process.platform === 'darwin' ? 'meta' : 'control']
+    await key('K', modifiers)
+    await key('0', modifiers)
+    await wait(() => js(`() => ![...document.querySelectorAll('.editor-shell .view-line')].some(line => line.textContent.includes('ALIGN_002'))`), 'real Monaco folding')
+    await assertSourceAlignment('after folding', 2)
+    assert.ok(await js(`() => ![...document.querySelectorAll('.aligned-output-row')].some(row => row.textContent.includes('ALIGN_002'))`), 'Folded source output must not overlap the fold header')
+    await screenshot('13-folded-alignment')
+    await key('K', modifiers)
+    await key('J', modifiers)
+    await assertSourceAlignment('after unfolding', 3)
+    await click('.output-settings > summary')
+    await click('input[aria-label="按源代码行对齐输出"]')
+    await click('.output-settings > summary')
+  })
+  await step('local suggestions preview the candidate and Tab accepts without breaking indentation', async () => {
+    await replaceCode('const localPrediction = { answer: 42 }\nlocalPred')
+    await key('/', ['alt'])
+    await wait(() => js(`() => [...document.querySelectorAll('.suggest-widget .monaco-list-row')].some(row => row.textContent.includes('localPrediction'))`), 'local variable suggestion')
+    await wait(() => exists('.ghost-text-decoration, .ghost-text-decoration-preview, .ghost-text'), 'inline candidate preview')
+    await screenshot('12-input-prediction')
+    await key('Tab')
+    await wait(async () => (await storedDocument()).code.endsWith('\nlocalPrediction'), 'Tab accepts local variable')
+    await main.webContents.insertText('.ans')
+    await key('/', ['alt'])
+    await wait(() => js(`() => [...document.querySelectorAll('.suggest-widget .monaco-list-row')].some(row => row.textContent.includes('answer'))`), 'object property suggestion')
+    await key('Tab')
+    await wait(async () => (await storedDocument()).code.endsWith('localPrediction.answer'), 'Tab accepts object member')
+    await replaceCode('')
+    await key('Escape')
+    await key('Tab')
+    assert.equal((await storedDocument()).code, '  ', 'Tab without suggestions must indent normally')
+    await key('Z', [process.platform === 'darwin' ? 'meta' : 'control'])
+    await wait(async () => (await storedDocument()).code === '', 'normal undo after indentation')
   })
   await step('manual ABORT and debounced live edits execute only latest code', async () => {
     await replaceCode('console.log("SMOKE_RESIDENT"); setInterval(() => {}, 1000)')

@@ -40,11 +40,11 @@ onBeforeUnmount(() => {
 <template>
   <section class="preview-pane" aria-label="React 组件预览">
     <header class="preview-pane__head">
-      <span>REACT PREVIEW <b>{{ status }}</b></span>
+      <span>REACT PREVIEW <b>{{ status }}</b> <span v-if="stale" class="preview-stale" tabindex="0" title="代码或输入已修改，当前画面来自上次运行；重启预览可更新。" aria-label="旧预览：代码或输入已修改，重启预览可更新">旧预览</span></span>
       <button class="micro-button" type="button" :disabled="busy" @click="emit('restart')">重启预览</button>
     </header>
-    <div v-if="error || stale" class="preview-notice" :class="{ 'preview-notice--error': error }" role="status">
-      {{ error || '代码或输入已修改，当前画面来自上次运行。' }}
+    <div v-if="error" class="preview-notice preview-notice--error" role="status">
+      {{ error }}
     </div>
     <div ref="host" class="preview-surface">
       <div v-if="!active" class="preview-empty">
@@ -61,6 +61,7 @@ onBeforeUnmount(() => {
 .preview-pane{display:flex;flex-direction:column;min-height:0;min-width:0;flex:1;background:#080d11;border:1px solid #29414a}
 .preview-pane__head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;flex:none;padding:9px 12px;color:var(--cyber-cyan);font-size:11px;border-bottom:1px solid #29414a}
 .preview-pane__head b{font-weight:400;color:#afc5ce;margin-left:8px}
+.preview-stale{margin-left:8px;color:#a0b1bc;font-size:10px;cursor:help}.preview-stale:focus-visible{outline:1px solid var(--cyber-yellow);outline-offset:3px}
 .preview-surface{flex:1;min-height:100px;position:relative;background:#fff}
 .preview-empty{display:flex;position:absolute;inset:0;align-items:center;justify-content:center;flex-direction:column;padding:20px;text-align:center;color:#b7ccd4;background:#0d171d;overflow:auto}
 .preview-empty strong{color:var(--cyber-cyan);font-size:14px}.preview-empty p{max-width:36em;font-size:12px;line-height:1.7}
