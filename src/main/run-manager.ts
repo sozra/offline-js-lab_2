@@ -4,7 +4,6 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type { WebContents } from 'electron'
-import * as esbuild from 'esbuild'
 import { IPC } from '@shared/ipc'
 import { parseScriptInput } from '@shared/input'
 import type {
@@ -14,6 +13,7 @@ import type {
 import type { WorkspaceService } from './workspace'
 import { createChildEnvironment, describeRuntime, probeNodeVersion, resolveNodeRuntime } from './runtime'
 import { instrumentSource, type InstrumentSourceResult } from './source-instrumenter'
+import { loadEsbuild } from './esbuild-loader'
 
 const MAX_CODE_BYTES = 2 * 1024 * 1024
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024
@@ -31,7 +31,7 @@ const __dirname = __offlineDirname(__filename);
 
 type SpawnProcess = typeof spawn
 type WebContentsTarget = Pick<WebContents, 'isDestroyed' | 'send'>
-type Compiler = Pick<typeof esbuild, 'build'>
+type Compiler = Pick<typeof import('esbuild'), 'build'>
 type OutputMetadata = Pick<RunOutputPayload, 'sourceLine' | 'location' | 'values'>
 interface RunRecord {
   child: ChildProcess
@@ -128,7 +128,7 @@ export class RunManager {
     private readonly getRunnerPath: () => string,
     private readonly spawnProcess: SpawnProcess = spawn,
     private readonly resolveRuntime: () => RuntimeDescriptor = resolveNodeRuntime,
-    private readonly getCompiler: () => Compiler = () => esbuild,
+    private readonly getCompiler: () => Compiler | Promise<Compiler> = () => loadEsbuild(),
     private readonly getNodeVersion: (runtime: RuntimeDescriptor) => Promise<string> = probeNodeVersion
   ) {}
 
@@ -173,7 +173,8 @@ export class RunManager {
       if (this.preparing?.cancelled) return { ok: false, error: '运行已取消。' }
       await fs.mkdir(this.workspace.getRunsPath(), { recursive: true })
       instrumented = instrumentSource(code, language, sourceFile)
-      await this.getCompiler().build({
+      const compiler = await this.getCompiler()
+      await compiler.build({
         stdin: {
           contents: instrumented.code + '\n//# sourceMappingURL=data:application/json;base64,' + Buffer.from(instrumented.sourceMap).toString('base64'),
           loader: language === 'typescript' ? 'ts' : 'js', resolveDir, sourcefile: sourceFile

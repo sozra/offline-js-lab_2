@@ -92,22 +92,6 @@ function resolveUnpackedPath(inputPath: string): string {
   return fsSync.existsSync(unpackedPath) ? unpackedPath : inputPath
 }
 
-function configureEsbuildBinary(): void {
-  if (!app.isPackaged) return
-  const platformPackage = `${process.platform}-${process.arch}`
-  const binaryRelativePath =
-    process.platform === 'win32' ? 'esbuild.exe' : path.join('bin', 'esbuild')
-  const candidate = path.join(
-    process.resourcesPath,
-    'app.asar.unpacked',
-    'node_modules',
-    '@esbuild',
-    platformPackage,
-    binaryRelativePath
-  )
-  if (fsSync.existsSync(candidate)) process.env.ESBUILD_BINARY_PATH = candidate
-}
-
 function getRunnerPath(): string {
   if (app.isPackaged) return resolveUnpackedPath(path.join(process.resourcesPath, 'runner.cjs'))
   return path.join(process.cwd(), 'src', 'main', 'runner.cjs')
@@ -470,7 +454,6 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   recentFiles = new RecentFiles(app.getPath('userData'))
-  configureEsbuildBinary()
   workspaceService = new WorkspaceService(app)
   await workspaceService.init()
   npmManager = new NpmManager(workspaceService)

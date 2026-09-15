@@ -1,8 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { SourceMap } from 'node:module'
-import * as esbuild from 'esbuild'
+import type { Message } from 'esbuild'
 import type { RunStartPayload, SourceLocation } from '@shared/types'
+import { loadEsbuild } from './esbuild-loader'
 import { createPreviewEntry, createPreviewRuntime } from './preview-runtime'
 
 export const PREVIEW_SCHEME = 'lab-preview'
@@ -27,6 +28,7 @@ export async function buildPreview(workspacePath: string, runId: string, payload
   const sourceFile = payload.sourceFilePath ? path.resolve(payload.sourceFilePath) : path.join(workspacePath, `scratch.${payload.language}`)
   const resolveDir = path.dirname(sourceFile)
   const outdir = path.join(workspacePath, '.offline-js-lab', 'previews', runId)
+  const esbuild = await loadEsbuild()
   const result = await esbuild.build({
     stdin: { contents: createPreviewEntry(runId), resolveDir: workspacePath, sourcefile: 'lab-preview-entry.jsx', loader: 'jsx' },
     outfile: path.join(outdir, 'preview.js'),
@@ -85,7 +87,7 @@ export function locatePreviewSource(artifact: PreviewArtifact, stack: string): S
 }
 
 export function previewBuildFailure(error: unknown): { error: string; location?: SourceLocation } {
-  const errors = (error as { errors?: esbuild.Message[] })?.errors
+  const errors = (error as { errors?: Message[] })?.errors
   if (!Array.isArray(errors) || errors.length === 0) return { error: error instanceof Error ? error.message : String(error) }
   if (errors.some((item) => item.text.includes('No matching export') && item.text.includes('"default"'))) {
     return { error: '请默认导出 React 组件，例如 export default function App() { return <div /> }。' }

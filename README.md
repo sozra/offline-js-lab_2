@@ -1,6 +1,8 @@
-# Offline JS Lab v0.4.3
+# Offline JS Lab v0.4.4
 
 Offline JS Lab 是一个运行在本机的 JavaScript / TypeScript Scratchpad，也支持 React JSX / TSX 交互组件预览。它使用 Electron、Vue 3、electron-vite、TypeScript、Monaco Editor 与 esbuild，目标是在不依赖账号或在线服务的前提下，提供接近 RunJS 的快速编辑与运行体验。
+
+v0.4.4 修复打包后运行代码报 `esbuild.exe ENOENT`、再次运行报 `write EPIPE` 的问题：esbuild 的 JS API 在模块加载时就捕获 `ESBUILD_BINARY_PATH`，因此主进程改为在首次动态 import 前由 `esbuild-loader.ts` 把该变量指向 `app.asar.unpacked` 内的真实平台二进制，不再依赖静态 import 与过晚的环境变量写入。同时修复 `--dir` 打包时 `artifactName` 中的 `${target}` 宏未定义导致构建报错的问题，NSIS / Portable 产物改为 `-setup` / `-portable` 命名。
 
 v0.4.3 增加本地 Electron 打包入口：`dist:* -- --electron-dist <路径>` 支持官方 ZIP、ZIP 所在目录或完整解压目录，也支持环境变量与 package.json 配置。打包前检查本地文件，失败不回退下载；`dist:check` 可单独预检，`--dir` 可只生成应用目录。
 
@@ -406,6 +408,7 @@ src/
 │  ├─ index.ts               Electron 生命周期、窗口、IPC
 │  ├─ source-instrumenter.ts 源行标注与隐式输出识别
 │  ├─ run-manager.ts         esbuild 与 Node 子进程
+│  ├─ esbuild-loader.ts      esbuild 延迟加载与打包二进制路径解析
 │  ├─ npm-manager.ts         npm CLI 操作
 │  ├─ runtime.ts             Node/npm 路径解析
 │  ├─ workspace.ts           工作区、package.json、.d.ts
@@ -609,6 +612,8 @@ npm run dist:win
 参考 [electron-builder 离线构建指南](https://www.electron.build/tutorials/offline-air-gapped-builds/)。`ELECTRON_SKIP_BINARY_DOWNLOAD` 只控制 Electron 安装准备，不会让 electron-builder 自动使用本地发行包。`npm start` / `npm run preview` 仍使用 `electron:ensure` 准备本机开发二进制；新增的打包路径配置不改写 `node_modules/electron`、`path.txt` 或开发启动环境。
 
 2026-09-14 验证 v0.4.3：`npm run check` 通过（19 组 / 135 项）；macOS arm64 分别使用本地完整解压目录和官方 ZIP 执行 `dist:mac -- --dir`，均完成源码构建和 `.app` 打包。ZIP 场景通过临时 Node preload 禁止构建进程的 TCP 连接，并将 Electron 下载镜像指向不可用端口，仍打包成功。已检查产物版本、Main / Preload / Renderer 与 runner 文件。本次未执行 Windows 实机、DMG / NSIS / Portable 安装包或应用界面冒烟测试。
+
+2026-09-16 验证 v0.4.4：`npm run check` 通过（21 组 / 139 项，含 esbuild-loader 单元测试与使用真实解包二进制的集成测试）；生产构建 `npm run test:electron` 全步骤通过。macOS arm64 实际执行 `dist:mac -- --dir`：构建无 `${target}` 宏错误，产物 `.app` 内 `app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild` 存在且与 loader 解析路径一致，主 bundle 中 esbuild 仅剩懒加载 import。本次未执行 Windows 实机打包验证、NSIS / Portable / DMG 安装包，也未在打包后的应用界面点击运行；Windows 上的实际效果需按 v0.4.3 记录的流程重新打包后人工确认。
 
 ## 当前非目标
 

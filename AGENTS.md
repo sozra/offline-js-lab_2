@@ -23,7 +23,7 @@ Offline JS Lab 是 Electron 本地 JavaScript / TypeScript Scratchpad，而不�
 - Vue 3 + `<script setup lang="ts">`：Renderer UI；
 - TypeScript：Main、Preload、Shared、Renderer，并以编译器 API 识别用户源码表达式；
 - Monaco Editor：代码编辑与语言服务；
-- esbuild：将用户 JS/TS 打包成临时 ESM；
+- esbuild：将用户 JS/TS 打包成临时 ESM；主进程必须经 `src/main/esbuild-loader.ts` 延迟加载，禁止静态 import；
 - 系统 Node.js 子进程：执行用户代码；
 - 系统 npm CLI：工作区依赖；
 - Vitest：单元和结构测试；
@@ -78,6 +78,7 @@ Vue 应用、Monaco、composables 与 CSS。Renderer 不直接使用 `fs`、`chi
 - `src/main/npm-manager.ts`：参数校验、npm spawn、输出转发与停止。
 - `src/main/source-instrumenter.ts`：识别可定位的 console 调用、纯表达式与未使用返回值的独立调用，只生成文本插入，不执行源码。
 - `src/main/run-manager.ts`：源码标注、esbuild、Node spawn、fd 3 结构化输出、输出限制、停止与清理。
+- `src/main/esbuild-loader.ts`：esbuild 延迟加载入口；打包环境在首次动态 import 前同步设置 `ESBUILD_BINARY_PATH` 指向 `app.asar.unpacked` 内的真实平台二进制。
 - `src/main/runner.cjs`：导入编译后的临时模块、格式化行定位输出并处理未捕获错误。
 - `src/preload/index.ts`：实现 `OfflineJsLabBridge`。
 - `src/renderer/src/main.ts`：Renderer 启动边界；先校验 Preload bridge，再动态导入并挂载 `App.vue`。
@@ -472,3 +473,11 @@ AI agent 完成修改时：
 - `npm run build` 只编译应用；不能附加本机 Electron 下载前置步骤，否则 macOS 打 Windows 包也会被本机下载阻塞。原有 `prestart/predev/prepreview` 仍保留。
 - 本地发行包只免去 Electron 下载，完全离线还需要项目 npm 依赖、平台系统工具和 builder 辅助工具缓存（`ELECTRON_BUILDER_CACHE`）。不能承诺仅设置 `ELECTRON_SKIP_BINARY_DOWNLOAD` 或 `--dir` 就能完整离线打包。打包 API 使用 `publish: 'never'`。
 - 涉及命令改动时验证在线默认计划、配置优先级、空格路径、版本/平台/架构错误、不完整文件及预检无副作用；实际打包验证须注明宿主系统和产物种类，不声称未执行的 Windows/安装包测试通过。
+
+## 21. v0.4.4 打包后 esbuild 二进制解析
+
+- esbuild 的 JS API 在 `require('esbuild')` 模块加载时捕获 `process.env.ESBUILD_BINARY_PATH`（`lib/main.js` 顶层求值），主进程 bundle 顶层的静态 import 会在 `app.whenReady()` 之前执行，`whenReady` 里再设置环境变量永远太晚。因此 `run-manager.ts` 与 `preview-build.ts` 禁止静态 import esbuild，必须通过 `esbuild-loader.ts` 的 `loadEsbuild()` 动态加载；类型引用使用 `import type` 或 `typeof import('esbuild')`。
+- `loadEsbuild()` 在首次动态 import 前同步解析二进制：打包环境下指向 `app.asar.unpacked/node_modules/@esbuild/<platform>-<arch>/`（win32 为 `esbuild.exe`，其余为 `bin/esbuild`），且仅当该文件真实存在时写入；`spawn` 无法执行 ASAR 内部路径，否则 Windows 首次运行报 ENOENT、之后 service 已死报 EPIPE。
+- 用户显式设置的 `ESBUILD_BINARY_PATH` 优先，不覆盖（与 `OFFLINE_JS_LAB_NODE` 处理一致）。找不到解包二进制时不写环境变量，让 esbuild 自行解析并报告原始错误。开发模式（无 `process.resourcesPath` 或无 unpacked 布局）保持 esbuild 默认 node_modules 解析。
+- `package.json` 的 `artifactName` 禁止使用 `${target}` 宏：`--dir` 目标没有该宏，electron-builder 会以 `cannot expand pattern ... macro target is not defined` 结束。产物命名拆到具体配置节：`nsis` 为 `-setup`、`portable` 为 `-portable`、`dmg` 显式声明；mac zip 使用 builder 默认命名（顶层 `zip` 配置节不在 electron-builder 26 schema 中，会校验失败）。
+- 验证至少覆盖：单元测试断言平台二进制路径与显式配置优先级；集成测试复制真实 `@esbuild` 二进制到模拟 `app.asar.unpacked` 布局并实际 `build()` 成功；实际 `dist:mac -- --dir` 后检查 `.app` 内 unpacked 二进制与主 bundle 懒加载。Windows 打包实机验证未执行时必须如实说明。
